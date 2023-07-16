@@ -4,18 +4,30 @@ import math
 from cookbook.recipe import *
 
 class MealPlan:
-	days = []
-	
-	def __init__(self, where):
-		where = "mealplans/" + where
-		with open(where, "r") as f:
-			reader = csv.reader(f, delimiter = ";")
-			for line in reader:
-				day_meals = []
-				for meal in line:
-					day_meals.append(Recipe(meal))
-				self.days.append(day_meals)
-	
+
+	def __init__(self, js):
+
+		data = json.loads(js)
+		self.name = data["name"]
+		self.date = data["date"]
+		self.amounts = {}
+		self.steps = []
+		
+		for entry in data["ingredients"]:
+			component = find_component(entry[0])
+			amount = entry[1]
+			self.amounts[component] = amount
+
+		if "yields" in data:
+			self.scalable = True
+			self.yields = data["yields"]
+		else:
+			self.scalable = False
+			self.yields = ""
+
+		for step in data["method"]:
+			self.steps.append(Step(step[0], step[1], step[2]))
+
 	def get_calories(self):
 		calories = []
 		for day in self.days:
@@ -23,7 +35,7 @@ class MealPlan:
 			for meal in day:
 				total += meal.get_calories()
 			calories.append(total)
-		return statistics.mean(calories)
+		return calories 
 
 	def __str__(self):
 		string = ""
@@ -36,3 +48,4 @@ class MealPlan:
 			string += "\n"
 		string += f"Average daily energy: {math.ceil(self.get_calories())} kcal\n"
 		return string
+

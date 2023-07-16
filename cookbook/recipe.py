@@ -1,4 +1,5 @@
 import math
+import json
 import csv
 
 from cookbook.ingredient import *
@@ -7,13 +8,11 @@ from cookbook.ingredient import *
 
 def display_mins(t):
 	minutes = math.floor(t / 60)
-	seconds = t & 60
+	seconds = t % 60
 	return (minutes, seconds)
 
 class Step():
-	description = ""
-	seconds = 0
-
+	
 	def __init__(self, description, minutes, seconds):
 		self.description = description
 		self.seconds = minutes * 60 + seconds
@@ -24,45 +23,44 @@ class Step():
 
 # Recipes.
 
-class Recipe():
-	name = ""
-	date = ""
-	amounts = {} # Dictionary of ingredient amounts indexed by ingredients.
-	steps = [] 
+class Recipe:
 
-	def __init__(self, where):
-		where = "recipes/" + where
-		with open(where, "r") as f:
-			reader = csv.reader(f, delimiter = ";")
-			
-			line = next(reader)
-			self.name = line[0]
-			self.date = line[1]
+	unit = "serv"
 
-			read_ingredient = True
-			for line in reader:
-				if (line[0] == "***"):
-					read_ingredient = False
-					continue	
-				if (read_ingredient):
-					ingredient = find_ingredient(line[0])
-					amount = float(line[1])
-					self.amounts[ingredient] = amount
-				else:
-					step = Step(line[0], int(line[1]), int(line[2]))
-					self.steps.append(step)
+	def __init__(self, js):
 
-	def get_calories(self):
+		data = json.loads(js)
+		self.name = data["name"]
+		self.date = data["date"]
+		self.amounts = {}
+		self.steps = []
+		
+		for entry in data["ingredients"]:
+			component = find_component(entry[0])
+			amount = entry[1]
+			self.amounts[component] = amount
+
+		if "yields" in data:
+			self.scalable = True
+			self.yields = data["yields"]
+		else:
+			self.scalable = False
+			self.yields = ""
+
+		for step in data["method"]:
+			self.steps.append(Step(step[0], step[1], step[2]))
+
+	def get_calories(self, servings = 1):
 		calories = 0
-		for ingredient in self.amounts:
-			calories += self.amounts[ingredient] * ingredient.calories
-		return calories
+		for component in self.amounts:
+			calories += self.amounts[component] * component.get_calories()
+		return servings * calories
 
 	def get_minutes(self):
 		total_seconds = 0
 		for step in self.steps:
 			total_seconds += step.seconds
-		return math.floor(total_seconds / 60)
+		return math.ceil(total_seconds / 60)
 
 	def __str__(self):
 		string = f"""
@@ -73,18 +71,31 @@ Preparation time: {self.get_minutes()} min
 INGREDIENTS
 """
 		for ingredient in self.amounts:
-			string += f"{self.amounts[ingredient]} {ingredient.name}\n"
+			string += f"{self.amounts[ingredient]} {ingredient.unit}  {ingredient.name}\n"
 
 		string += "\nMETHOD\n"
 		total_secs = 0
 		for step in self.steps:
-			tot_mins, tot_secs = display_mins(total_secs)
-			mins, secs = display_mins(step.seconds)
-			string += f"{tot_mins}:{tot_secs} > "
-			string += f"{step.description} ({mins}:{secs})\n"
 			total_secs += step.seconds
-			return string
+			tot_mins, tot_secs = display_mins(total_secs)
+			string += f"- {step.description} >{tot_mins}:{tot_secs}\n"
+		return string
 
 	def render_tex(self):
 		return
 
+recipes = {}
+
+def load_recipes():
+	global components_index
+	global recipes
+	with open("recipes.csv", "r") as f:
+		for line in csv.reader(f):
+			id_name = line[0]
+			with open(f"recipes/{id_name}.json", "r") as rfile:
+				data = rfile.read()
+				recipe = Recipe(data)
+				components[id_name] = recipe
+				recipes[id_name] = recipe
+
+load_recipes()
