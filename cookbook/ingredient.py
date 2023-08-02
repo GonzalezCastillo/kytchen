@@ -1,8 +1,6 @@
 import csv
 
 class Ingredient():
-
-
 	def __init__(self, name, calories, unit):
 		self.name = name
 		self.calories = calories
@@ -15,8 +13,9 @@ class Ingredient():
 		return f"{self.name} ({self.calories} kcal/{self.unit})"
 
 components = {}
+
 def load_ingredients():
-	global components_index
+	global components
 	with open("ingredients.csv", "r") as f:
 		for line in csv.reader(f, delimiter = ";"):
 			id_name = line[0]

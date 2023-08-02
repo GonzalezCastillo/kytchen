@@ -40,21 +40,21 @@ class Recipe:
 			amount = entry[1]
 			self.amounts[component] = amount
 
-		if "yields" in data:
-			self.scalable = True
-			self.yields = data["yields"]
-		else:
-			self.scalable = False
-			self.yields = ""
-
 		for step in data["method"]:
 			self.steps.append(Step(step[0], step[1], step[2]))
 
+	def get_amounts(self, servings = 1):
+		amounts = {}
+		for component in self.amounts:
+			amounts[component] = self.amounts[component] * servings
+		return amounts
+
 	def get_calories(self, servings = 1):
 		calories = 0
-		for component in self.amounts:
-			calories += self.amounts[component] * component.get_calories()
-		return servings * calories
+		amounts = self.get_amounts(servings)
+		for component in amounts:
+			calories += amounts[component] * component.get_calories()
+		return calories
 
 	def get_minutes(self):
 		total_seconds = 0
@@ -62,16 +62,18 @@ class Recipe:
 			total_seconds += step.seconds
 		return math.ceil(total_seconds / 60)
 
-	def __str__(self):
+	def console_string(self, servings = 1):
 		string = f"""
 {self.name} ({self.date})
-Calories: {self.get_calories()} kcal
+Servings: {servings}
+Calories: {math.ceil(self.get_calories(servings))} kcal
 Preparation time: {self.get_minutes()} min
 
 INGREDIENTS
 """
-		for ingredient in self.amounts:
-			string += f"{self.amounts[ingredient]} {ingredient.unit}  {ingredient.name}\n"
+		amounts = self.get_amounts(servings)
+		for ingredient in amounts:
+			string += f"{amounts[ingredient]} {ingredient.unit}  {ingredient.name}\n"
 
 		string += "\nMETHOD\n"
 		total_secs = 0
@@ -81,13 +83,19 @@ INGREDIENTS
 			string += f"- {step.description} >{tot_mins}:{tot_secs}\n"
 		return string
 
-	def render_tex(self):
+	def render_tex(self, servings = 1):
 		return
+
+	def print(self, servings = 1):
+		print(self.console_string(servings))
+
+	def __str__(self):
+		return self.console_string(servings = 1)
 
 recipes = {}
 
 def load_recipes():
-	global components_index
+	global components
 	global recipes
 	with open("recipes.csv", "r") as f:
 		for line in csv.reader(f):
