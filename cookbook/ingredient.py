@@ -18,6 +18,8 @@ def load_ingredients():
 	global components
 	with open("ingredients.csv", "r") as f:
 		for line in csv.reader(f, delimiter = ";"):
+			if line[0] == "":
+				continue
 			id_name = line[0]
 			full_name = line[1]
 			calories = float(line[2])
