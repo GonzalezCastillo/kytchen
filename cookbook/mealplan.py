@@ -69,7 +69,7 @@ class MealPlan:
 		for i, day in enumerate(self.consume):
 			string += f"Day {i}\nCONSUME:\n"
 			for meal in day:
-				string += f"- {meal.name} ({math.ceil(meal.get_calories())} kcal)\n"
+				string += f"- {meal.name} (servings: {day[meal]}, {math.ceil(meal.get_calories() * day[meal])} kcal)\n"
 			string += "PREPARE:\n"
 			for recipe in self.prepare[i]:
 				string += f"- {recipe.name} (servings: {self.prepare[i][recipe]})\n"
