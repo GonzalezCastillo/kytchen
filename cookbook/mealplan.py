@@ -16,7 +16,7 @@ def expand_recipe(dic, recipe, servings):
 def get_day_prepare(recipes):
 	amounts = {}
 	for item in recipes:
-		expand_recipe(amounts, item, recipes[item])
+		expand_recipe(amounts, item, find_component(item))
 	return amounts
 
 class MealPlan:
@@ -31,7 +31,7 @@ class MealPlan:
 		for day in data["consume"]:
 			consume = {}
 			for entry in day:
-				recipe = recipes[entry[0]]
+				recipe = find_component[entry[0]]
 				amount = entry[1]
 				consume[recipe] = amount
 			self.consume.append(consume)
@@ -48,7 +48,7 @@ class MealPlan:
 			for element in rm:
 				done.pop(element)
 			for entry in day:
-				element = recipes[entry]
+				element = find_component[entry]
 				if not entry in prepare:
 					prepare[element] = 0
 				done[element] = prepare

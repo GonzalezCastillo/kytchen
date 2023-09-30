@@ -92,18 +92,19 @@ INGREDIENTS
 	def __str__(self):
 		return self.console_string(servings = 1)
 
-recipes = {}
-
-def load_recipes():
+def get_recipe(name):
 	global components
-	global recipes
-	with open("recipes.csv", "r") as f:
-		for line in csv.reader(f):
-			id_name = line[0]
-			with open(f"recipes/{id_name}.json", "r") as rfile:
-				data = rfile.read()
-				recipe = Recipe(data)
-				components[id_name] = recipe
-				recipes[id_name] = recipe
+	if name not in components:
+		with open(f"recipes/{name}.json", "r") as rfile:
+			data = rfile.read()
+			recipe = Recipe(data)
+			components[name] = recipe
+	return components[name]
 
-load_recipes()
+def find_component(name):
+	global components
+	if name in components:
+		return components[name]
+	else:
+		print(name)
+		return get_recipe(name)

@@ -26,8 +26,6 @@ def load_ingredients():
 			unit = line[3]
 			components[id_name] = Ingredient(full_name, calories, unit)
 
-def find_component(id):
-	return components[id]
 
 load_ingredients()
 
