@@ -1,6 +1,7 @@
 import math
 import json
 import csv
+import os
 
 from cookbook.ingredient import *
 
@@ -13,13 +14,30 @@ def display_mins(t):
 
 class Step():
 	
-	def __init__(self, description, minutes, seconds):
+	def __init__(self, description, seconds):
 		self.description = description
-		self.seconds = minutes * 60 + seconds
+		self.seconds = seconds
 	
 	def __str__(self):
-		mins, secs = display_mins(self.seconds)
-		return f"{self.description} ({mins}:{secs})"
+		if self.seconds != math.nan:
+			mins, secs = display_mins(self.seconds)
+			return f"{self.description} ({mins}:{secs})"
+		else:
+			return self.description
+
+def process_step(raw_step):
+	
+	if type(raw_step) == str:
+		return Step(raw_step, math.nan)
+
+	desc = raw_step[0]
+	time = raw_step[1]
+	if type(time) == list:
+		time = 60 * time[0] + time[1]
+	else:
+		time = 60 * time
+	
+	return Step(desc, time)
 
 # Recipes.
 
@@ -27,21 +45,71 @@ class Recipe:
 
 	unit = "serv"
 
-	def __init__(self, js):
-
-		data = json.loads(js)
-		self.name = data["name"]
-		self.date = data["date"]
+	def __init__(self, ingredients, method = [], name = "", date = ""):
+		self.name = name
+		self.date = date
 		self.amounts = {}
 		self.steps = []
-		
-		for entry in data["ingredients"]:
-			component = find_component(entry[0])
-			amount = entry[1]
-			self.amounts[component] = amount
+		self.id_name = "_"
+		self.kept = False
 
-		for step in data["method"]:
-			self.steps.append(Step(step[0], step[1], step[2]))
+		for entry in ingredients:
+			if type(entry) == str:
+				self.amounts[find_component(entry)] = ingredients[entry]
+			elif type(entry) == Ingredient:
+				self.amounts[entry] = ingredients[entry]
+			else:
+				raise TypeError("Invalid ingredient", entry)
+		
+		for step in method:
+			self.steps.append(process_step(step))
+
+	def keep(self, id_name):
+		if self.kept:
+			raise Exception("This ingredient has already been kept", self)
+			return
+		else:
+			self.kept = True
+
+		global components
+		self.id_name = id_name
+		components[id_name] = self
+
+	def save(self, path = ""):
+		if path == "":
+			path = self.id_name
+
+		if not self.kept:
+			self.keep(path)
+
+		struct = {"name": self.name, "date": self.date}
+		ingrd = {}
+		for component in self.amounts:
+			if component.id_name == "":
+				raise Exception("All components must be kept")
+				return
+			ingrd[component.id_name] = self.amounts[component]
+		steps = []
+		for step in self.steps:
+			if step.seconds == math.nan:
+				steps.append(step.desc)
+			elif step.seconds % 60 == 0:
+				steps.append([step.desc, step.seconds/60])
+			else:
+				mins = math.floor(steps.seconds / 60)
+				secs = step.seconds % 60
+				steps.append([step.desc, [mins, secs]])
+
+		struct["method"] = steps
+		struct["ingredients"] = ingrd
+
+		if not os.path.exists("recipes"):
+			os.mkdir("recipes")
+	
+		js = json.dumps(struct)
+		with open("recipes/" + path + ".json", "w") as f:
+			f.write(js)
+
 
 	def get_amounts(self, servings = 1):
 		amounts = {}
@@ -62,15 +130,19 @@ class Recipe:
 			total_seconds += step.seconds
 		return math.ceil(total_seconds / 60)
 
-	def console_string(self, servings = 1):
-		string = f"""
-{self.name} ({self.date})
+	def recipe_string(self, servings = 1):
+		string = self.name
+		if self.date != "":
+			string += f" ({self.date})"
+		string += f"""
 Servings: {servings}
 Calories: {math.ceil(self.get_calories(servings))} kcal
-Preparation time: {self.get_minutes()} min
-
-INGREDIENTS
 """
+		mins = self.get_minutes()
+		if mins != math.nan and mins != 0:
+			string += f"Preparation time: {self.get_minutes()} min\n"
+
+		string += "\nINGREDIENTS\n"
 		amounts = self.get_amounts(servings)
 		for ingredient in amounts:
 			string += f"{amounts[ingredient]} {ingredient.unit}  {ingredient.name}\n"
@@ -78,33 +150,50 @@ INGREDIENTS
 		string += "\nMETHOD\n"
 		total_secs = 0
 		for step in self.steps:
-			total_secs += step.seconds
-			tot_mins, tot_secs = display_mins(total_secs)
-			string += f"- {step.description} >{tot_mins}:{tot_secs}\n"
+			if mins != math.nan:
+				total_secs += step.seconds
+				tot_mins, tot_secs = display_mins(total_secs)
+				string += f"- {step.description} >{tot_mins}:{tot_secs}\n"
+			elif step.seconds != math.nan:
+				add_mins, add_secs = display_mins(step.seconds)
+				string += f"- {step.description} +{top_mins}:{tot_secs}\n"
+			else:
+				string += f"- {step.description}\n"
 		return string
 
-	def render_tex(self, servings = 1):
-		return
-
 	def print(self, servings = 1):
-		print(self.console_string(servings))
+		print(self.recipe_string(servings))
 
 	def __str__(self):
-		return self.console_string(servings = 1)
+		return self.recipe_string(servings = 1)
+
+def parse_recipe(js):
+	data = json.loads(js)
+	ingredients = data["ingredients"]	
+	name = data["name"]
+	date = ""
+	if "date" in data:
+		date = data["date"]
+	method = []
+	if "method" in data:
+		method = data["method"]
+	return Recipe(ingredients, method, name, date)
 
 def get_recipe(name):
 	global components
 	if name not in components:
 		with open(f"recipes/{name}.json", "r") as rfile:
 			data = rfile.read()
-			recipe = Recipe(data)
-			components[name] = recipe
+			recipe = parse_recipe(data)
+			recipe.keep(name)
 	return components[name]
 
 def find_component(name):
+	if type(name) != str:
+		return name
+	
 	global components
 	if name in components:
 		return components[name]
 	else:
-		print(name)
 		return get_recipe(name)
