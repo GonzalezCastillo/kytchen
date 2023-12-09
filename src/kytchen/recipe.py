@@ -3,7 +3,7 @@ import json
 import csv
 import os
 
-from cookbook.ingredient import *
+from kytchen.ingredient import *
 
 # Recipe steps.
 
@@ -22,7 +22,6 @@ class Step():
 		if self.seconds != math.nan:
 			mins, secs = display_mins(self.seconds)
 			return f"{self.description} ({mins}:{secs})"
-		else:
 			return self.description
 
 def process_step(raw_step):
@@ -38,6 +37,19 @@ def process_step(raw_step):
 		time = 60 * time
 	
 	return Step(desc, time)
+
+def readable_amounts(amounts):
+	new_amounts = {}
+	for component in amounts:
+		if type(component) == str:
+			new_amounts[component] = amounts[component]
+		elif component.id_name == "":
+			raise Exception("All components must be kept")
+			return None
+		else:
+			new_amounts[component.id_name] = amounts[component]
+	return new_amounts
+
 
 # Recipes.
 
@@ -79,29 +91,22 @@ class Recipe:
 		if path == "":
 			path = self.id_name
 
-		if not self.kept:
-			self.keep(path)
+		components[path] = self	
 
 		struct = {"name": self.name, "date": self.date}
-		ingrd = {}
-		for component in self.amounts:
-			if component.id_name == "":
-				raise Exception("All components must be kept")
-				return
-			ingrd[component.id_name] = self.amounts[component]
 		steps = []
 		for step in self.steps:
-			if step.seconds == math.nan:
-				steps.append(step.desc)
+			if math.isnan(step.seconds):
+				steps.append(step.description)
 			elif step.seconds % 60 == 0:
-				steps.append([step.desc, step.seconds/60])
+				steps.append([step.description, step.seconds/60])
 			else:
-				mins = math.floor(steps.seconds / 60)
+				mins = math.floor(step.seconds / 60)
 				secs = step.seconds % 60
-				steps.append([step.desc, [mins, secs]])
+				steps.append([step.description, [mins, secs]])
 
 		struct["method"] = steps
-		struct["ingredients"] = ingrd
+		struct["ingredients"] = readable_amounts(self.amounts)
 
 		if not os.path.exists("recipes"):
 			os.mkdir("recipes")
@@ -128,7 +133,10 @@ class Recipe:
 		total_seconds = 0
 		for step in self.steps:
 			total_seconds += step.seconds
-		return math.ceil(total_seconds / 60)
+		if not math.isnan(total_seconds):
+			return math.ceil(total_seconds / 60)
+		else:
+			return math.nan
 
 	def recipe_string(self, servings = 1):
 		string = self.name
@@ -139,7 +147,7 @@ Servings: {servings}
 Calories: {math.ceil(self.get_calories(servings))} kcal
 """
 		mins = self.get_minutes()
-		if mins != math.nan and mins != 0:
+		if not math.isnan(mins) and mins != 0:
 			string += f"Preparation time: {self.get_minutes()} min\n"
 
 		string += "\nINGREDIENTS\n"
@@ -150,13 +158,13 @@ Calories: {math.ceil(self.get_calories(servings))} kcal
 		string += "\nMETHOD\n"
 		total_secs = 0
 		for step in self.steps:
-			if mins != math.nan:
+			if not math.isnan(mins):
 				total_secs += step.seconds
 				tot_mins, tot_secs = display_mins(total_secs)
 				string += f"- {step.description} >{tot_mins}:{tot_secs}\n"
-			elif step.seconds != math.nan:
+			elif not math.isnan(step.seconds):
 				add_mins, add_secs = display_mins(step.seconds)
-				string += f"- {step.description} +{top_mins}:{tot_secs}\n"
+				string += f"- {step.description} +{add_mins}:{add_secs}\n"
 			else:
 				string += f"- {step.description}\n"
 		return string
