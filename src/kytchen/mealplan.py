@@ -4,50 +4,55 @@ import os
 
 from kytchen.recipe import *
 
-def number_subrecipes(recipe):
+def _number_subrecipes(recipe):
 	num = 1
-	for component in recipe.amounts:
+	for component in recipe.get_amounts():
 		if type(component) == Recipe:
-			num += number_subrecipes(component)
+			num += _number_subrecipes(component)
 	return num
 
-def expand_recipe(dic, recipe, servings):
-	if not recipe in dic:
-		dic[recipe] = 0
-	dic[recipe] += servings
-	for component in recipe.amounts:
+def _expand_recipe(dct, recipe, servings):
+	if not recipe in dct:
+		dct[recipe] = 0
+	dct[recipe] += servings
+	amounts = recipe.get_amounts()
+	for component in amounts:
 		if type(component) == Recipe:
-			expand_recipe(dic, component, servings * recipe.amounts[component])
-	return dic
+			_expand_recipe(dct, component, servings * amounts[component])
+	return dct
 
-def get_day_prepare(recipes):
+def _get_day_prepare(recipes):
 	amounts = {}
 	for item in recipes:
-		expand_recipe(amounts, item, recipes[item])
+		recipe = find_component(item)
+		_expand_recipe(amounts, recipe, recipes[item])
 
-	sortkey = lambda item: -number_subrecipes(item[0])
+	sortkey = lambda item: -_number_subrecipes(item[0])
 	return dict(sorted(amounts.items(), key = sortkey))
 	
-def add_ingredients(dic, recipe, servings):
-	for component in recipe.amounts:
+def _add_ingredients(dct, recipe, servings):
+	amounts = recipe.get_amounts()
+	for component in amounts:
 		if type(component) == Recipe:
-			add_ingredients(dic, component, servings)
+			_add_ingredients(dct, component, servings)
 		else:
-			if not component in dic:
-				dic[component] = 0
-			dic[component] += recipe.amounts[component] * servings
+			if not component in dct:
+				dct[component] = 0
+			dct[component] += amounts[component] * servings
 
-def purge_dictionary(dic):
+def _purge_dictionary(dct):
 	rm = []
-	for entry in dic:
-		if dic[entry] == 0:
+	for entry in dct:
+		if dct[entry] == 0:
 			rm.append(entry)
 	for entry in rm:
-		dic.pop(entry)
+		dct.pop(entry)
 
 
 class MealPlan:
 	def set_prepare(self, prepare):
+		"""This function is used to update "prepare", which is private.
+"""
 		self._extra_prepare = prepare
 		self._prepare = []
 		if len(prepare) != len(self.consume):
@@ -56,13 +61,13 @@ class MealPlan:
 
 		done = {}
 		for i, extra in enumerate(prepare):
-			this_prepare = get_day_prepare(self.consume[i])
+			this_prepare = _get_day_prepare(self.consume[i])
 			for recipe in this_prepare:
 				if recipe in done:
 					amount_done = min(done[recipe], this_prepare[recipe])
 					done[recipe] -= amount_done
 					all_amounts_done = {}
-					expand_recipe(all_amounts_done, recipe, amount_done)
+					_expand_recipe(all_amounts_done, recipe, amount_done)
 					for component in all_amounts_done:
 						this_prepare[component] -= all_amounts_done[component]
 			for entry in extra:
@@ -72,39 +77,46 @@ class MealPlan:
 				done[recipe] += extra[entry]
 
 				all_amounts_do = {}
-				expand_recipe(all_amounts_do, recipe, extra[entry])
+				_expand_recipe(all_amounts_do, recipe, extra[entry])
 				
 				for component in all_amounts_do:
 					if not recipe in this_prepare:
 						this_prepare[component] = 0
 					this_prepare[component] += all_amounts_do[component]
 
-			purge_dictionary(this_prepare)
-			purge_dictionary(done)
+			_purge_dictionary(this_prepare)
+			_purge_dictionary(done)
 			self._prepare.append(this_prepare)
 
 		self._excedent = done
 
 	def __init__(self, consume, prepare, name = "", date = ""):
+		"""Initialises a MealPlan object with the following arguments:
+- consume: A list specifying what meals will be consumed.
+    Must have the number of days covered by the plan as length.
+    Each item must be a dictionary where
+        - keys are recipes to be consumed,
+        - and values are the number of servings to be consumed.
+- prepare: A list of the same length as consume.
+    Each item must be a dictionary where
+        - keys are the extra recipes that will be prepared,
+        - and values are the extra servings that will be prepared.
+- name: Optional name of the meal plan.
+- date: Optional date of creation of the meal plan.
+"""
 
 		self.name = name
 		self.date = date
-		self.consume = []
-	
-		for day in consume:
-			parsed_day = {}	
-			for recipe in day:
-				parsed_day[find_component(recipe)] = day[recipe]
-			self.consume.append(parsed_day)
-
+		self.consume = consume
 		self.set_prepare(prepare)
+		self.path = ""
 
 	def get_calories(self):
 		calories = []
 		for day in self.consume:
 			total = 0
 			for meal in day:
-				total += meal.get_calories() * day[meal]
+				total += find_component(meal).get_calories() * day[meal]
 			calories.append(total)
 		return calories 
 
@@ -112,7 +124,7 @@ class MealPlan:
 		ingredients = {}
 		for day in self.consume:
 			for meal in day:
-				add_ingredients(ingredients, meal, day[meal])
+				_add_ingredients(ingredients, find_component(meal), day[meal])
 		return ingredients
 
 	def get_excedent(self):
@@ -122,15 +134,16 @@ class MealPlan:
 		string = ""
 		for i, day in enumerate(self.consume):
 			string += f"Day {i + 1}\nCONSUME:\n"
-			for meal in day:
-				string += f"- {meal.name} (servings: {day[meal]}, {math.ceil(meal.get_calories() * day[meal])} kcal)\n"
+			for item in day:
+				meal = find_component(item)
+				string += f"- {meal.name} (servings: {day[item]}, {math.ceil(meal.get_calories() * day[item])} kcal)\n"
 			string += "PREPARE:\n"
 			for recipe in self._prepare[i]:
 				string += f"- {recipe.name} (servings: {self._prepare[i][recipe]})\n"
 			string += "\n"
 		string += f"Average daily energy: {math.ceil(statistics.mean(self.get_calories()))} kcal\n"
 		if len(self._excedent) != 0:
-			string += "\n EXCEDENT:\n"
+			string += "\nEXCEDENT:\n"
 			for element in self._excedent:
 				string += f"{self._excedent[element]} {element.name}\n"
 		return string
@@ -141,16 +154,15 @@ class MealPlan:
 		for ing in ingredients:
 			string += f"{ing.name}: {ingredients[ing]} {ing.unit}\n"
 		return string
-	
-	def save(self, path):
+
+	def save(self, path = ""):
+		if path == "":
+			path = self.path
 		struct = {}
 		struct["name"] = self.name
 		struct["date"] = self.date
-		struct["consume"] = []
-		struct["prepare"] = []
-		for i in range(len(self.consume)):
-			struct["consume"].append(readable_amounts(self.consume[i]))
-			struct["prepare"].append(readable_amounts(self._extra_prepare[i]))
+		struct["consume"] = self.consume
+		struct["prepare"] = self._extra_prepare
 
 		if not os.path.exists("mealplans"):
 			os.mkdir("mealplans")
@@ -159,9 +171,11 @@ class MealPlan:
 		with open("mealplans/" + path + ".json", "w") as f:
 			f.write(js)
 
-
+		mealplans[path] = self
 
 def parse_mealplan(js):
+	"""Creates a MealPlan object from a JSON representation.
+"""
 	data = json.loads(js)
 	consume = data["consume"]
 	prepare = data["prepare"]
@@ -171,10 +185,12 @@ def parse_mealplan(js):
 		date = data["date"]
 	return MealPlan(consume, prepare, name, date)
 
-
 mealplans = {}
 
 def load_mealplans():
+	"""Loads all the meal plans in the mealplans/ folder.
+They are stored in the "mealplans" dictionary.
+"""
 	global mealplans
 	if not os.path.isdir("mealplans"):
 		return
@@ -184,6 +200,7 @@ def load_mealplans():
 		with open(f"mealplans/{file}", "r") as rfile:
 			data = rfile.read()
 			mealplan = parse_mealplan(data) 
+			mealplan.path = file.rstrip(".json")
 			mealplans[mealplan.name] = mealplan
 
 load_mealplans()
