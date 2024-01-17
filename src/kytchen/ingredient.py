@@ -23,6 +23,9 @@ class Ingredient():
 
 	def __str__(self):
 		return f"{self.name} ({self.calories} kcal/{self.unit})"
+	
+	def __repr__(self):
+		return self.__str__()
 
 
 def load_ingredients():

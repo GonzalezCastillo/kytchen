@@ -96,7 +96,7 @@ A path must be specified if the recipe hasn't been saved yet.
 If it had been saved before, the path must be the same (or dropped).
 When a recipe is saved, it can be reached with find_component.
 """
-		if path == "" and self.id_name != "":
+		if path == "" and self.id_name == "":
 			raise Exception("A path must be provided", self)
 		elif path != "":
 			self._keep(path)
@@ -115,13 +115,14 @@ When a recipe is saved, it can be reached with find_component.
 				secs = step.seconds % 60
 				steps.append([step.description, [mins, secs]])
 
-		struct["method"] = steps
 		struct["ingredients"] = self.amounts
+		if steps != []:
+			struct["method"] = steps
 
 		if not os.path.exists("recipes"):
 			os.mkdir("recipes")
 	
-		js = json.dumps(struct)
+		js = json.dumps(struct, indent = '\t')
 		with open("recipes/" + path + ".json", "w") as f:
 			f.write(js)
 
@@ -169,7 +170,8 @@ Calories: {math.ceil(self.get_calories(servings))} kcal
 		for ingredient in amounts:
 			string += f"{amounts[ingredient]} {ingredient.unit}  {ingredient.name}\n"
 
-		string += "\nMETHOD\n"
+		if self.steps != []:
+			string += "\nMETHOD\n"
 		total_secs = 0
 		for step in self.steps:
 			if not math.isnan(mins):
@@ -188,6 +190,9 @@ Calories: {math.ceil(self.get_calories(servings))} kcal
 
 	def __str__(self):
 		return self.recipe_string(servings = 1)
+	
+	def __repr__(self):
+		return f"{self.name} ({math.ceil(self.get_calories(1))} kcal/serv)"
 
 def parse_recipe(js):
 	"""Creates a Recipe object from a JSON representation.
