@@ -90,7 +90,7 @@ class MealPlan:
 
 		self._excedent = done
 
-	def __init__(self, consume, prepare, name = "", date = ""):
+	def __init__(self, consume, prepare, name = "Unnamed meal plan", date = ""):
 		"""Initialises a MealPlan object with the following arguments:
 - consume: A list specifying what meals will be consumed.
     Must have the number of days covered by the plan as length.
@@ -131,7 +131,10 @@ class MealPlan:
 		return self._excedent
 
 	def __str__(self):
-		string = ""
+		string = self.name
+		if self.date != "":
+			string += f" ({self.date})"
+		string += "\n\n"
 		for i, day in enumerate(self.consume):
 			string += f"Day {i + 1}\nCONSUME:\n"
 			for item in day:
@@ -147,6 +150,9 @@ class MealPlan:
 			for element in self._excedent:
 				string += f"{self._excedent[element]} {element.name}\n"
 		return string
+
+	def __repr__(self):
+		return self.name
 
 	def shopping_list(self):
 		string = "";
@@ -200,7 +206,7 @@ They are stored in the "mealplans" dictionary.
 		with open(f"mealplans/{file}", "r") as rfile:
 			data = rfile.read()
 			mealplan = parse_mealplan(data) 
-			mealplan.path = file.rstrip(".json")
-			mealplans[mealplan.name] = mealplan
+			mealplan.path = file[:-5] # Remove extension (.json)
+			mealplans[mealplan.path] = mealplan
 
 load_mealplans()
