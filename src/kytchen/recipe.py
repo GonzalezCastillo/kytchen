@@ -210,11 +210,10 @@ def parse_recipe(js):
 
 def _get_recipe(name):
 	global _components
-	if name not in _components:
-		with open(f"recipes/{name}.json", "r") as rfile:
-			data = rfile.read()
-			recipe = parse_recipe(data)
-			recipe._keep(name)
+	with open(f"recipes/{name}.json", "r") as rfile:
+		data = rfile.read()
+		recipe = parse_recipe(data)
+		recipe._keep(name)
 	return _components[name]
 
 def find_component(name):
@@ -227,3 +226,11 @@ In the case of recipes, name must be the path to the recipe.
 		return _components[name]
 	else:
 		return _get_recipe(name)
+
+def reload_recipes():
+	"""Reloads all saved recipes.
+"""
+	global _components
+	for item in _components:
+		if type(_components[item]) == Recipe:
+			_get_recipe(item)
