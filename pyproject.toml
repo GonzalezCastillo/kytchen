@@ -11,7 +11,6 @@ authors = [
 description = "Handle your recipes and organise your meal plans"
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = ["math", "os", "csv", "json"]
 license = {text = "MIT License"}
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -20,11 +19,11 @@ classifiers = [
 	"Topic :: Utilities",
 	"Development Status :: 3 - Alpha",
 ]
-keywords = ["cooking", "recipes", "meals"]
+keywords = ["cooking", "recipes"]
 
 [project.urls]
 Homepage = "https://sgc.ink/work/"
-Issues = "https://github.com/gonzalezcastillo/kytchen"
+Repository = "https://github.com/gonzalezcastillo/kytchen"
 
 [tool.hatch.version]
 path = "src/kytchen/__init__.py"
