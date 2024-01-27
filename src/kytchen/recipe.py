@@ -56,7 +56,7 @@ class Recipe:
 
 	unit = "serv"
 
-	def __init__(self, ingredients, method = [], name = "", date = ""):
+	def __init__(self, ingredients, method = [], name = "Unnamed recipe", date = ""):
 		"""Initialises a Recipe object with the following arguments:
 - ingredients: A dictionary specifying the components of the recipe,
 	- keys are IDs or paths of ingredients or recipes,
