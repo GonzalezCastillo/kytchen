@@ -21,9 +21,19 @@ classifiers = [
 ]
 keywords = ["cooking", "recipes"]
 
+dependencies = ["PyQt6>=6.6.0,<7.0.0"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+	"kytchen/*.py",
+]
+
 [project.urls]
 Homepage = "https://sgc.ink/work/"
 Repository = "https://github.com/gonzalezcastillo/kytchen"
 
 [tool.hatch.version]
-path = "src/kytchen/__init__.py"
+path = "kytchen/__init__.py"
+
+[project.gui-scripts]
+kytchen = "kytchen.app:main"
