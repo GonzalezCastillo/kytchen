@@ -313,6 +313,7 @@ class DashboardTableModel(SortTableModel):
     def action(self, index):
         if not index.isValid():
             return None
+        index = self.real_index(index)
         self.content[index.row()].get_window()
 
     def data(self, index, role):
