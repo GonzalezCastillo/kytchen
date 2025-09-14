@@ -111,7 +111,7 @@ class Recipe:
     def new_component(self, id_name, amount = Decimal(0), strict = False):
         new = self.cookbook.link_component(self, id_name)
         if new != None:
-            self.amounts.append([new, Decimal(0)])
+            self.amounts.append([new, num(amount)])
             return True
         elif strict:
             raise ValueError("invalid component ID")
