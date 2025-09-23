@@ -124,7 +124,10 @@ class CoreTableModel(QAbstractTableModel):
         index1 = self.index(len(self.content) - 1, col)
         self.dataChanged.emit(index0, index1)
 
-    def real_index(self, index):
+    def source_index(self, index):
+        return index
+
+    def table_index(self, index):
         return index
 
     def setData(self, index, value, role = Qt.ItemDataRole.EditRole):
@@ -137,7 +140,7 @@ class CoreTableModel(QAbstractTableModel):
         return True        
 
     def flags(self, index):
-        index = self.real_index(index)
+        index = self.table_index(index)
         if not index.isValid():
             return Qt.ItemFlag.NoItemFlags
         if index.column() in self.not_editable:
@@ -159,7 +162,7 @@ class CoreTableModel(QAbstractTableModel):
     def general_delete_row(self, index, by_row = False):
         if by_row:
             index = self.index(index, 0)
-        index = self.real_index(index)
+        index = self.table_index(index)
         index = index.row()
         self.beginRemoveRows(QModelIndex(), index, index)
         self.delete_entry(index)
@@ -253,9 +256,15 @@ class SortTableModel(CoreTableModel):
         super().__init__(parent, content)
         self.proxy = None
     
-    def real_index(self, index):
+    def table_index(self, index):
         if self.proxy != None:
             return self.proxy.mapFromSource(index)
+        else:
+            return index
+
+    def source_index(self, index):
+        if self.proxy != None:
+            return self.proxy.mapToSource(index)
         else:
             return index
 
@@ -313,7 +322,7 @@ class DashboardTableModel(SortTableModel):
     def action(self, index):
         if not index.isValid():
             return None
-        index = self.real_index(index)
+        index = self.source_index(index)
         self.content[index.row()].get_window()
 
     def data(self, index, role):
