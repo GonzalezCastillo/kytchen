@@ -49,8 +49,10 @@ class Step():
 
 class Recipe:
     unit = "serv"
-    def __init__(self, id_name, cookbook, name = "", category = "", steps = []):
+    def __init__(self, id_name, cookbook, name = "", category = "", steps = None):
         self.name = name
+        if steps == None:
+            steps = []
         self.steps = steps
         self.category = category
 
@@ -80,7 +82,7 @@ class Recipe:
         name = data["name"]
         category = data["category"]
         steps = []
-        for step in steps:
+        for step in data["steps"]:
             steps.append(Step(step[0], step[1]))
         return cls(id_name, cookbook, name, category, steps)
     
