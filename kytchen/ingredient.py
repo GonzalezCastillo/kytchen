@@ -1,15 +1,23 @@
+from typing import TYPE_CHECKING, Any, Optional, Union, cast
+from PyQt6.QtWidgets import QWidget
+
+if TYPE_CHECKING:
+    from .cookbook import Cookbook
+    from .mealplan import Mealplan
+    from .recipe import Recipe
+
 from decimal import Decimal
-from .views import SortTableModel, SortTable, create_new, num
+from .views import SortTableModel, SortTable, create_new, num, Numeric
 
 class Ingredient():
-    def __init__(self, id_name, name = "", calories = Decimal(0), unit = ""):
+    def __init__(self, id_name: str, name: str = "", calories: Numeric = Decimal(0), unit: str = "") -> None:
         self.name = name
-        self.calories = calories
+        self.calories = num(calories)
         self.unit = unit
-        self._used = {}
+        self._used: dict[Union[Recipe, Mealplan], int] = {}
         self._id = id_name
     
-    def export(self):
+    def export(self) -> dict[str, Any]:
         data = {}
         data["name"] = self.name
         data["calories"] = str(self.calories)
@@ -18,19 +26,19 @@ class Ingredient():
         return data
 
     @classmethod
-    def load(cls, data):
+    def load(cls, data: dict[str, Any]) -> Ingredient:
         return cls(data["id"], data["name"], Decimal(data["calories"]), data["unit"])
 
-    def get_calories(self):
+    def get_calories(self) -> Decimal:
         return self.calories
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.name} ({self.calories} kcal/{self.unit})"
     
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.__str__()
 
-    def _col(self, col, string = True):
+    def _col(self, col: int, string: bool = True) -> Union[str, Decimal, None]:
         if col == 0:
             return self._id
         elif col == 1:
@@ -44,25 +52,26 @@ class Ingredient():
             return self.unit
         return None
 
-    def get_ingredients(self, amount):
+    def get_ingredients(self, amount: Decimal) -> dict[Ingredient, Decimal]:
         return {self: amount}
 
 
 
 class IngredientModel(SortTableModel):
+    content: list[Ingredient]
     header_names = ["ID", "Ingredient", "kcal/unit", "Unit"]
     align = ["", "left", "", ""]
 
-    def __init__(self, parent, cookbook):
+    def __init__(self, parent: Optional[QWidget], cookbook: Cookbook) -> None:
         self.cookbook = cookbook
         super().__init__(parent, cookbook.ingredients)
 
-    def get_data(self, row, col):
+    def get_data(self, row: int, col: int) -> Union[str, Decimal, None]:
         ing = self.content[row]
         return ing._col(col)
 
 
-    def set_data(self, row, col, value):
+    def set_data(self, row: int, col: int, value: Any) -> bool:
         ing = self.content[row]
         if col == 0:
             self.cookbook.update_component_id(ing, value) 
@@ -79,14 +88,14 @@ class IngredientModel(SortTableModel):
         
         return True        
 
-    def new_entry(self):
-        def create_function(new_id):
+    def new_entry(self) -> None:
+        def create_function(new_id: str) -> bool:
             ing = Ingredient(new_id)
             return self.cookbook.register_ingredient(ing)
-        create_new(self.parent(), "ingredient", create_function)
+        create_new(cast(Optional[QWidget], self.parent()), "ingredient", create_function)
     
-    def delete_entry(self, row):
-        self.cookbook.delete_ingredient(row, self.parent())
+    def delete_entry(self, row: int) -> None:
+        self.cookbook.delete_ingredient(row, cast(Optional[QWidget], self.parent()))
 
  
 class IngredientTable(SortTable):
@@ -95,6 +104,4 @@ class IngredientTable(SortTable):
     default_widths = [(0, 150), (2, 100), (3, 100)]
     fixed_widths = [2, 3]
     stretch_widths = [1]
-
-
 

@@ -1,3 +1,4 @@
+from typing import Optional, cast
 import sys, os
 from pathlib import Path
 
@@ -6,7 +7,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QStackedWidget, QListWidget, QFileDialog,
 )
 from PyQt6.QtCore import Qt, QSettings
-from PyQt6.QtGui import QIcon, QPixmap
+from PyQt6.QtGui import QIcon, QPixmap, QCloseEvent
 
 from .cookbook import Cookbook
 from .ingredient import IngredientTable
@@ -22,7 +23,7 @@ settings = QSettings("SGCink", "Kytchen")
 #BASEDIR = Path(__file__).parent
 #ICON_PATH = str(BASEDIR / "kytchen.png")
 
-def select_file(parent, save):
+def select_file(parent: Optional[QWidget], save: bool) -> tuple[str, str]:
     if save:
         dialogue = QFileDialog.getSaveFileName
         msg = "Save your cookbook"
@@ -30,24 +31,30 @@ def select_file(parent, save):
         dialogue = QFileDialog.getOpenFileName
         msg = "Open a cookbook"
     
-    file_path, ok = dialogue(parent, msg, "", "Cookbooks (*.js)")
-    if ok and save and not file_path.endswith(".js"):
-        file_path = file_path + ".js"
+    file_path, ok = dialogue(parent, msg, "", "Cookbooks (*.json)")
+    if ok and save and not file_path.endswith(".json"):
+        file_path = file_path + ".json"
     return file_path, ok
 
-def safe_save(cookbook, please = False):
+def safe_save(cookbook: Cookbook, please: bool = False) -> bool:
     if cookbook.is_empty() and not please:
-        return
-    while not cookbook.path:
+        return True
+    path = cookbook.path
+    while not path:
         path, ok = select_file(cookbook.window, True)
         if not ok:
-            return
-        cookbook.set_path(path)
-    cookbook.save()
-    settings.setValue("last_file", os.path.abspath(cookbook.path))
+            return False
+    try:
+        cookbook.save(path)
+    except OSError as error:
+        show_error(cookbook.window, f"Could not save {path}: {error}")
+        return False
+    cookbook.set_path(path)
+    settings.setValue("last_file", os.path.abspath(path))
+    return True
 
 class HomeView(QWidget):
-    def __init__(self, parent, cookbook):
+    def __init__(self, parent: MainWindow, cookbook: Cookbook) -> None:
         self.cookbook = cookbook
         super().__init__(parent)
         layout = QVBoxLayout(self)
@@ -88,21 +95,24 @@ It will be saved automatically."
         layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         layout.setContentsMargins(40,70,40,70)
 
-    def save_as(self):
+    def save_as(self) -> None:
         path = None
         while not path:
             path, ok = select_file(self, True)
             if not ok:
                 return
-        self.cookbook.save(path)
+        try:
+            self.cookbook.save(path)
+        except OSError as error:
+            show_error(self, f"Could not save {path}: {error}")
 
 class AboutWindow(QWidget):
-    def __init__(self, parent):
+    def __init__(self, parent: Optional[QWidget]) -> None:
         super().__init__(parent = parent)
         self.setWindowFlag(Qt.WindowType.Window)
         self.setWindowTitle("About Kytchen")
         self.setFixedSize(400,300)
-        self.layout = QVBoxLayout()
+        self.layout: QVBoxLayout = QVBoxLayout()  # type: ignore[assignment]
         self.setLayout(self.layout)
         general_margin(self.layout)
         self.layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
@@ -152,11 +162,11 @@ QListWidget::item:selected {
 """
 
 class MainWindow(QMainWindow):
-    def __init__(self, cookbook):
+    def __init__(self, cookbook: Cookbook) -> None:
         super().__init__()
         self.about = AboutWindow(self)
         self.setGeometry(200, 200, 1000, 700)
-        self.cookbook = None
+        self.cookbook = cookbook
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
     
@@ -195,15 +205,14 @@ class MainWindow(QMainWindow):
                 pass
         self.set_cookbook(cookbook)
 
-    def menu_action(self, index):
+    def menu_action(self, index: int) -> None:
         self.stack.setCurrentIndex(index)
 
-    def set_cookbook(self, cookbook):
-        if self.cookbook != None:
-            while self.stack.count() > 0:
-                widget = self.stack.widget(0)
-                self.stack.removeWidget(widget)
-                widget.deleteLater()
+    def set_cookbook(self, cookbook: Cookbook) -> None:
+        while self.stack.count() > 0:
+            widget = cast(QWidget, self.stack.widget(0))
+            self.stack.removeWidget(widget)
+            widget.deleteLater()
         self.setWindowTitle(f"Kytchen - {cookbook.get_name()}")
         self.cookbook = cookbook
         self.views = [
@@ -217,16 +226,18 @@ class MainWindow(QMainWindow):
         self.cookbook.window = self
         self.sidebar.setCurrentRow(0)
 
-    def save_update(self):
-        safe_save(self.cookbook, please = True)
-        self.set_cookbook(self.cookbook)
+    def save_update(self) -> None:
+        if safe_save(self.cookbook, please = True):
+            self.set_cookbook(self.cookbook)
 
-    def new_cookbook(self):
-        safe_save(self.cookbook)
+    def new_cookbook(self) -> None:
+        if not safe_save(self.cookbook):
+            return
         self.set_cookbook(Cookbook())
     
-    def open_cookbook(self):
-        safe_save(self.cookbook)
+    def open_cookbook(self) -> bool:
+        if not safe_save(self.cookbook):
+            return False
         path, ok = select_file(self, False)
         if not ok:
             return False
@@ -238,14 +249,17 @@ class MainWindow(QMainWindow):
         self.set_cookbook(new_cookbook)
         return True
 
-    def closeEvent(self, event):
-        safe_save(self.cookbook)
+    def closeEvent(self, event: QCloseEvent) -> None:
+        # TODO: Ask user if they want to save changes before closing
+        if not safe_save(self.cookbook):
+            event.ignore()
+            return
         event.accept()
 
-    def show_about(self):
+    def show_about(self) -> None:
         self.about.show()
 
-def main():
+def main() -> None:
     app = QApplication(sys.argv)
     #app.setWindowIcon(QIcon(ICON_PATH))
     cb = Cookbook()
@@ -255,4 +269,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

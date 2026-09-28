@@ -1,22 +1,29 @@
+from typing import Any, Callable, Optional, Union, cast
+
 from PyQt6.QtCore import (
     QAbstractTableModel, Qt, QSortFilterProxyModel, pyqtSignal,
-    QModelIndex, QEvent
+    QModelIndex, QEvent, QAbstractItemModel, QPoint, QItemSelectionModel
 )
 from PyQt6.QtWidgets import (
     QTableView, QMenu, QHeaderView, QWidget, QHBoxLayout, QVBoxLayout,
     QPushButton, QLineEdit, QStyledItemDelegate, QStyle, QStyleOptionButton,
-    QApplication, QMessageBox, QInputDialog, QLabel, QAbstractItemView
+    QApplication, QMessageBox, QInputDialog, QLabel, QAbstractItemView,
+    QLayout, QStyleOptionViewItem
 )
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QAction, QFont, QKeyEvent, QMouseEvent, QPainter
 from decimal import Decimal
 
-def num(value):
+Numeric = Union[Decimal, int, float, str]
+
+def num(value: Numeric) -> Decimal:
     value = Decimal(value)
+    if not value.is_finite():
+        raise ValueError("expected finite amount")
     if value < 0:
         raise ValueError("expected non-negative amount")
     return value
 
-def show_error(view, msg):
+def show_error(view: Optional[QWidget], msg: str) -> None:
     msg_box = QMessageBox(view)
     msg_box.setIcon(QMessageBox.Icon.Critical)
     msg_box.setWindowTitle("Error")
@@ -24,7 +31,7 @@ def show_error(view, msg):
     msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
     msg_box.exec()
 
-def create_new(parent, object_id, create_function):
+def create_new(parent: Optional[QWidget], object_id: str, create_function: Callable[[str], bool]) -> None:
     ok = True
     context = ""
     while ok:
@@ -38,13 +45,13 @@ def create_new(parent, object_id, create_function):
         else:
             context = f"The ID '{try_id}' is assigned to another component.\n"
 
-def general_margin(view):
+def general_margin(view: Union[QWidget, QLayout]) -> None:
     view.setContentsMargins(15, 15, 15, 15)
 
-def no_margin(view):
+def no_margin(view: Union[QWidget, QLayout]) -> None:
     view.setContentsMargins(0,0,0,0)
 
-def Title(text):
+def Title(text: str) -> QLabel:
     view = QLabel(text)
     font = QFont()
     font.setPointSize(20)
@@ -52,7 +59,7 @@ def Title(text):
     view.setFont(font)
     return view
 
-def Subtitle(text):
+def Subtitle(text: str) -> QLabel:
     view = QLabel(text)
     font = QFont()
     font.setPointSize(14)
@@ -62,38 +69,45 @@ def Subtitle(text):
 
 class ClickLabel(QLabel):
     clicked = pyqtSignal()
-    def mouseReleaseEvent(self, event):
+    def mouseReleaseEvent(self, event: Optional[QMouseEvent]) -> None:
+        if event is None:
+            return
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit()
         super().mouseReleaseEvent(event)
 
 class CoreTableModel(QAbstractTableModel):
-    header_names = []
-    align = []
-    not_editable = []
+    header_names: list[str] = []
+    align: list[str] = []
+    not_editable: list[int] = []
 
-    def __init__(self, parent, content):
+    def __init__(self, parent: Optional[QWidget], content: list[Any]) -> None:
         super().__init__(parent)
         self.content = content
         self.ncols = len(self.header_names)
 
-    def rowCount(self, parent = None):
+    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
+        if parent.isValid():
+            return 0
         return len(self.content)
 
-    def columnCount(self, parent = None):
+    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
+        if parent.isValid():
+            return 0
         return self.ncols
 
-    def get_data(self, row, col):
+    def get_data(self, row: int, col: int) -> Any:
         return None
 
-    def deep_data(self, row, col, is_display):
+    def deep_data(self, row: int, col: int, is_display: bool) -> Any:
         return self.get_data(row, col)
 
-    def data(self, index, role = Qt.ItemDataRole.DisplayRole):
-        if not index.isValid():
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
+        if not index.isValid() or not (0 <= index.row() < len(self.content)
+                                      and 0 <= index.column() < self.ncols):
             return None
         if role == Qt.ItemDataRole.TextAlignmentRole:
-            align = self.align[index.column()]
+            align = self.align[index.column()] if index.column() < len(self.align) else ""
             if align == "right":
                 return Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
             elif align == "left":
@@ -103,35 +117,41 @@ class CoreTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
             return self.deep_data(index.row(), index.column(), role == Qt.ItemDataRole.DisplayRole)
 
-    def headerData(self, section, orientation, role = Qt.ItemDataRole.DisplayRole):
+    def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole) -> Optional[str]:
         if role == Qt.ItemDataRole.DisplayRole:
             if orientation == Qt.Orientation.Vertical:
                 return ""
-            elif orientation == Qt.Orientation.Horizontal:
+            elif orientation == Qt.Orientation.Horizontal and 0 <= section < self.ncols:
                 return self.header_names[section] 
         return None
 
-    def set_data(self, row, col, value):
+    def set_data(self, row: int, col: int, value: Any) -> bool:
         return True
 
-    def update_row(self, row):
+    def update_row(self, row: int) -> None:
+        if not 0 <= row < len(self.content) or self.ncols == 0:
+            return
         index0 = self.index(row, 0)
         index1 = self.index(row, self.ncols - 1)
         self.dataChanged.emit(index0, index1)
 
-    def update_col(self, col):
+    def update_col(self, col: int) -> None:
+        if not self.content or not 0 <= col < self.ncols:
+            return
         index0 = self.index(0, col)
         index1 = self.index(len(self.content) - 1, col)
         self.dataChanged.emit(index0, index1)
 
-    def source_index(self, index):
+    def source_index(self, index: QModelIndex) -> QModelIndex:
         return index
 
-    def table_index(self, index):
+    def table_index(self, index: QModelIndex) -> QModelIndex:
         return index
 
-    def setData(self, index, value, role = Qt.ItemDataRole.EditRole):
-        if not index.isValid() or not role == Qt.ItemDataRole.EditRole:
+    def setData(self, index: QModelIndex, value: Any, role: int = Qt.ItemDataRole.EditRole) -> bool:
+        if (not index.isValid() or role != Qt.ItemDataRole.EditRole
+                or not 0 <= index.row() < len(self.content)
+                or not 0 <= index.column() < self.ncols):
             return False
         changed = self.set_data(index.row(), index.column(), value)
         if not changed:
@@ -139,8 +159,7 @@ class CoreTableModel(QAbstractTableModel):
         self.dataChanged.emit(index, index)
         return True        
 
-    def flags(self, index):
-        index = self.table_index(index)
+    def flags(self, index: QModelIndex) -> Qt.ItemFlag:
         if not index.isValid():
             return Qt.ItemFlag.NoItemFlags
         if index.column() in self.not_editable:
@@ -148,33 +167,46 @@ class CoreTableModel(QAbstractTableModel):
 
         return Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsEditable
 
-    def new_entry(self):
+    def new_entry(self) -> None:
         return None
 
-    def general_new_row(self):
+    def general_new_row(self) -> None:
         self.beginResetModel() 
-        self.new_entry()
-        self.endResetModel()
+        try:
+            self.new_entry()
+        finally:
+            self.endResetModel()
 
-    def delete_entry(self, row):
+    def delete_entry(self, row: int) -> None:
         return None
 
-    def general_delete_row(self, index, by_row = False):
+    def general_delete_row(self, index: Union[QModelIndex, int], by_row: bool = False) -> None:
         if by_row:
-            index = self.index(index, 0)
-        index = self.table_index(index)
-        index = index.row()
-        self.beginRemoveRows(QModelIndex(), index, index)
-        self.delete_entry(index)
-        self.endRemoveRows()
+            if not isinstance(index, int):
+                return
+            view = self.parent()
+            model = view.model() if isinstance(view, QTableView) else self
+            if model is None:
+                return
+            index = model.index(index, 0)
+        if not isinstance(index, QModelIndex):
+            return
+        index = self.source_index(index)
+        if not index.isValid() or not 0 <= index.row() < len(self.content):
+            return
+        self.beginResetModel()
+        try:
+            self.delete_entry(index.row())
+        finally:
+            self.endResetModel()
 
 class CoreTable(QWidget):
-    ModelClass = CoreTableModel
-    item_name = ""
-    default_widths = []
-    fixed_widths = []
-    stretch_widths = []
-    def __init__(self, content):
+    ModelClass: type[CoreTableModel] = CoreTableModel
+    item_name: Optional[str] = ""
+    default_widths: list[tuple[int, int]] = []
+    fixed_widths: list[int] = []
+    stretch_widths: list[int] = []
+    def __init__(self, content: Any) -> None:
         super().__init__()
         self.table = QTableView()
         self.model = self.ModelClass(self.table, content)
@@ -184,11 +216,11 @@ class CoreTable(QWidget):
         for row, width in self.default_widths:
             self.table.setColumnWidth(row, width)
         for row in self.fixed_widths:
-            self.table.horizontalHeader().setSectionResizeMode(row, QHeaderView.ResizeMode.Fixed)
+            cast(QHeaderView, self.table.horizontalHeader()).setSectionResizeMode(row, QHeaderView.ResizeMode.Fixed)
         for row in self.stretch_widths:
-            self.table.horizontalHeader().setSectionResizeMode(row, QHeaderView.ResizeMode.Stretch)
+            cast(QHeaderView, self.table.horizontalHeader()).setSectionResizeMode(row, QHeaderView.ResizeMode.Stretch)
 
-        self.layout = QVBoxLayout()
+        self.layout: QVBoxLayout = QVBoxLayout()  # type: ignore[assignment]
         no_margin(self.layout)
         self.layout.setSpacing(0)
         self.layout.addWidget(self.table)
@@ -211,7 +243,7 @@ class CoreTable(QWidget):
 
         self.setLayout(self.layout)
 
-    def open_menu(self, position):
+    def open_menu(self, position: QPoint) -> None:
         if not self.is_editable:
             return None
 
@@ -219,16 +251,18 @@ class CoreTable(QWidget):
         index = self.table.indexAt(position)
 
         if index.isValid():
-            remove_action = menu.addAction(f"Remove {self.item_name}")
+            remove_action = cast(QAction, menu.addAction(f"Remove {self.item_name}"))
             remove_action.triggered.connect(lambda: self.model.general_delete_row(index))
             menu.addSeparator()
 
-        new_transaction = menu.addAction(f"New {self.item_name}")
+        new_transaction = cast(QAction, menu.addAction(f"New {self.item_name}"))
         new_transaction.triggered.connect(lambda: self.model.general_new_row())
 
-        menu.exec(self.table.viewport().mapToGlobal(position))
+        menu.exec(cast(QWidget, self.table.viewport()).mapToGlobal(position))
 
-    def keyPressEvent(self, event):
+    def keyPressEvent(self, event: Optional[QKeyEvent]) -> None:
+        if event is None:
+            return
         if self.is_editable and event.key() == Qt.Key.Key_Delete:
             selected_indexes = self.table.selectedIndexes()
             if selected_indexes:
@@ -237,7 +271,7 @@ class CoreTable(QWidget):
         else:
             super().keyPressEvent(event)
 
-    def set_editable(self, edit):
+    def set_editable(self, edit: bool) -> None:
         if self.item_name == None:
             return 
         self.is_editable = edit
@@ -248,32 +282,33 @@ class CoreTable(QWidget):
         self.control_bar_widget.setVisible(edit)
 
 class ReverseSortProxy(QSortFilterProxyModel):
-    def lessThan(self, left, right):
-        return not super().lessThan(left, right)
+    def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:
+        return super().lessThan(right, left)
 
 class SortTableModel(CoreTableModel):
-    def __init__(self, parent, content):
+    def __init__(self, parent: Optional[QWidget], content: list[Any]) -> None:
         super().__init__(parent, content)
-        self.proxy = None
+        self.proxy: Optional[QSortFilterProxyModel] = None
     
-    def table_index(self, index):
+    def table_index(self, index: QModelIndex) -> QModelIndex:
         if self.proxy != None:
             return self.proxy.mapFromSource(index)
         else:
             return index
 
-    def source_index(self, index):
+    def source_index(self, index: QModelIndex) -> QModelIndex:
         if self.proxy != None:
             return self.proxy.mapToSource(index)
         else:
             return index
 
-    def set_proxy(self, proxy):
+    def set_proxy(self, proxy: QSortFilterProxyModel) -> None:
         self.proxy = proxy
 
 class SortTable(CoreTable):
-    ModelClass = SortTableModel
-    def __init__(self, content):
+    model: SortTableModel
+    ModelClass: type[CoreTableModel] = SortTableModel
+    def __init__(self, content: Any) -> None:
         super().__init__(content)
         sort_model = ReverseSortProxy(self.table)
         sort_model.setSourceModel(self.model)
@@ -295,7 +330,9 @@ class ButtonDelegate(QStyledItemDelegate):
 
     clicked = pyqtSignal(QModelIndex)
 
-    def paint(self, painter, option, index):
+    def paint(self, painter: Optional[QPainter], option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        if painter is None:
+            return
 
         button = QStyleOptionButton()
         button.rect = option.rect
@@ -306,12 +343,12 @@ class ButtonDelegate(QStyledItemDelegate):
                if option.state & QStyle.StateFlag.State_Selected
                else QStyle.StateFlag.State_Raised)
         )
-        QApplication.style().drawControl(
+        cast(QStyle, QApplication.style()).drawControl(
                 QStyle.ControlElement.CE_PushButton, button, painter
         )
 
-    def editorEvent(self, event, model, option, index):
-        if event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
+    def editorEvent(self, event: Optional[QEvent], model: Optional[QAbstractItemModel], option: QStyleOptionViewItem, index: QModelIndex) -> bool:
+        if isinstance(event, QMouseEvent) and event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
             rect = option.rect
             if rect.contains(event.pos()):
                 self.clicked.emit(index)
@@ -319,13 +356,15 @@ class ButtonDelegate(QStyledItemDelegate):
         return False
 
 class DashboardTableModel(SortTableModel):
-    def action(self, index):
+    def action(self, index: QModelIndex) -> None:
         if not index.isValid():
             return None
         index = self.source_index(index)
+        if not index.isValid() or not 0 <= index.row() < len(self.content):
+            return
         self.content[index.row()].get_window()
 
-    def data(self, index, role):
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
         if not index.isValid():
             return None
 
@@ -336,14 +375,15 @@ class DashboardTableModel(SortTableModel):
         return super().data(index, role)
 
 class DashboardTable(SortTable):
-    def __init__(self, content):
+    model: DashboardTableModel
+    def __init__(self, content: Any) -> None:
         super().__init__(content)
-        delegate = ButtonDelegate()
+        delegate = ButtonDelegate(self.table)
         self.table.setItemDelegateForColumn(self.model.ncols - 1, delegate)
         delegate.clicked.connect(self.model.action)
 
 class FixTable(CoreTable):
-    def __init__(self, content):
+    def __init__(self, content: Any) -> None:
         super().__init__(content)
 
         self.up_button = QPushButton("Move up")
@@ -353,34 +393,34 @@ class FixTable(CoreTable):
 
         self.up_button.setVisible(False)
         self.down_button.setVisible(False)
-        self.table.selectionModel().selectionChanged.connect(self.update_buttons)
+        cast(QItemSelectionModel, self.table.selectionModel()).selectionChanged.connect(self.update_buttons)
 
         self.control_bar.insertWidget(0, self.up_button)
         self.control_bar.insertWidget(0, self.down_button)
 
         self.data = self.model.content
 
-    def update_buttons(self):
-        row_selected = self.table.selectionModel().hasSelection()
+    def update_buttons(self) -> None:
+        row_selected = cast(QItemSelectionModel, self.table.selectionModel()).hasSelection()
         self.up_button.setVisible(row_selected)
         self.down_button.setVisible(row_selected)
 
-    def move_up(self):
+    def move_up(self) -> None:
         index = self.table.currentIndex()
         row = index.row()
-        if row > 0:
-            self.model.beginMoveRows(QModelIndex(), row, row, QModelIndex(), row - 1)
+        if index.isValid() and 0 < row < len(self.data):
+            if not self.model.beginMoveRows(QModelIndex(), row, row, QModelIndex(), row - 1):
+                return
             self.data[row - 1], self.data[row] = self.data[row], self.data[row - 1]
             self.model.endMoveRows()
             self.table.selectRow(row - 1)
 
-    def move_down(self):
+    def move_down(self) -> None:
         index = self.table.currentIndex()
         row = index.row()
-        if row < len(self.data) - 1:
-            self.model.beginMoveRows(QModelIndex(), row, row, QModelIndex(), row + 2)
+        if index.isValid() and 0 <= row < len(self.data) - 1:
+            if not self.model.beginMoveRows(QModelIndex(), row, row, QModelIndex(), row + 2):
+                return
             self.data[row + 1], self.data[row] = self.data[row], self.data[row + 1]
             self.model.endMoveRows()
             self.table.selectRow(row + 1)
-
-
