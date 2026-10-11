@@ -7,7 +7,7 @@ if TYPE_CHECKING:
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QInputDialog, QLabel, QWidget
 
-from .views import CoreTableModel, FixTable, general_margin
+from .views import CoreTableModel, FixTable
 
 
 class MetricModel(CoreTableModel):
@@ -34,8 +34,12 @@ class MetricModel(CoreTableModel):
     def new_entry(self) -> None:
         context = ""
         while True:
-            metric, ok = QInputDialog.getText(cast(Optional[QWidget], self.parent()), "New metric",
-                context + "Please enter the name of the new metric (for instance, 'g protein'):")
+            metric, ok = QInputDialog.getText(
+                cast(Optional[QWidget], self.parent()),
+                "New metric",
+                context
+                + "Please enter the name of the new metric (for instance, 'g protein'):",
+            )
             if not ok:
                 return
             if self.cookbook.add_metric(metric):
@@ -61,9 +65,10 @@ class MetricTable(FixTable):
         super().__init__(cookbook)
         self.model.rowsMoved.connect(lambda *args: self.model.changed.emit())
 
-        info = QLabel("Metrics are given per unit of each ingredient and added up "
-            "in recipes and meal plans. The first metric is the one shown most "
-            "prominently.")
+        info = QLabel(
+            "Metrics are given per unit of each ingredient and added up "
+            "in recipes and meal plans.\n"
+            "The first metric is the one shown most prominently. "
+        )
         info.setWordWrap(True)
-        general_margin(info)
-        self.layout.insertWidget(0, info)
+        self.vbox.insertWidget(0, info)

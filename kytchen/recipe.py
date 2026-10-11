@@ -6,63 +6,51 @@ if TYPE_CHECKING:
     from .ingredient import Ingredient
     from .mealplan import Mealplan
 
-import math
+import json
+from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QInputDialog, QWidget, QHBoxLayout, QVBoxLayout, QPushButton
+    QWidget,
+    QHBoxLayout,
+    QPushButton,
+    QLabel,
+    QHeaderView,
+    QFileDialog,
 )
+import uuid
 from decimal import Decimal
 
 from .views import (
-    DashboardTable, DashboardTableModel, CoreTableModel, FixTable,
-    create_new, num, num_string, metric_strings, set_metric_labels, Numeric,
-    Title, Subtitle, general_margin, no_margin
+    DashboardTable,
+    DashboardTableModel,
+    CoreTableModel,
+    FixTable,
+    EntriesTable,
+    DetailView,
+    TextDelegate,
+    ServingsBox,
+    ask_name,
+    num_string,
+    exact_string,
+    json_number,
+    metric_strings,
+    show_error,
+    Numeric,
+    no_margin,
 )
 
 
-def time_string(t: float) -> str:
-    if math.isnan(t):
-        return "unknown"
-    if t < 0:
-        raise ValueError("cannot time travel")
-    hours = math.floor(t / 3600)
-    t = t % 3600
-    minutes = math.floor(t / 60)
-    seconds = t % 60
-    time = ""
-    if hours != 0:
-        time += f"{hours}:"
-    time += f"{minutes}:{seconds}"
-    return time
-
-def parse_time(time: str) -> int:
-    chunks = time.split(':')
-    if len(chunks) == 1:
-        return int(chunks[0]) * 60
-    elif len(chunks) == 2:
-        return int(chunks[0]) * 60 + int(chunks[1])
-    elif len(chunks) == 3:
-        return int(chunks[0]) * 3600 + int(chunks[1]) * 60 + int(chunks[2])
-    else:
-        raise ValueError("invalid time format")
-
-class Step():
-    def __init__(self, description: str, seconds: float) -> None:
-        if seconds < 0 or math.isinf(seconds):
-            raise ValueError("expected non-negative finite duration")
-        self.description = description
-        self.seconds = seconds
-    
-    def __str__(self) -> str:
-        if not math.isnan(self.seconds):
-            return f"{self.description} ({time_string(self.seconds)})"
-        else:
-            return self.description
-
 class Recipe:
     unit = "serv"
-    def __init__(self, id_name: str, cookbook: Cookbook, name: str = "", category: str = "", steps: Optional[list[Step]] = None) -> None:
+
+    def __init__(
+        self,
+        cookbook: Cookbook,
+        name: str = "",
+        category: str = "",
+        steps: Optional[list[str]] = None,
+        id_name: Optional[str] = None,
+    ) -> None:
         self.name = name
         if steps == None:
             steps = []
@@ -71,125 +59,109 @@ class Recipe:
 
         self.cookbook = cookbook
         self.amounts: list[list[Any]] = []
-        self._id = id_name
+        self._id = id_name if id_name is not None else str(uuid.uuid4())
         self._used: dict[Union[Recipe, Mealplan], int] = {}
         self.window: Optional[RecipeView] = None
 
     def export(self) -> dict[str, Any]:
-        data: dict[str, Any] = {"name": self.name, "category": self.category, "id": self._id}
-        steps = []
-        for step in self.steps:
-            steps.append([step.description, step.seconds]) 
+        data: dict[str, Any] = {
+            "name": self.name,
+            "category": self.category,
+            "id": self._id,
+        }
         amounts = []
         for component, amount in self.amounts:
             amounts.append([component._id, str(amount)])
 
-        data["steps"] = steps
+        data["steps"] = list(self.steps)
         data["amounts"] = amounts
 
-        return data 
+        return data
 
     @classmethod
     def load_steps(cls, data: dict[str, Any], cookbook: Cookbook) -> Recipe:
         id_name = data["id"]
         name = data["name"]
         category = data["category"]
-        steps = []
-        for step in data["steps"]:
-            steps.append(Step(step[0], step[1]))
-        return cls(id_name, cookbook, name, category, steps)
-    
+        steps = data["steps"]
+        if not all(isinstance(step, str) for step in steps):
+            raise ValueError("invalid step")
+        return cls(cookbook, name, category, list(steps), id_name)
+
     def load_amounts(self, data: dict[str, Any]) -> None:
         for entry in data["amounts"]:
             self.new_component(entry[0], entry[1], True)
 
-    def change_amounts(self, index: int, component: Optional[str] = None, amount: Optional[Numeric] = None, strict: bool = False) -> bool:
-        if amount != None:
-            try:
-                value = num(amount)
-            except (ValueError, TypeError, ArithmeticError):
-                if strict:
-                    raise ValueError("invalid amount")
-                return False
-        if component != None:
-            ing, _ = self.amounts[index]
-            new = self.cookbook.change_link(self, ing, component)
-            if new == None:
-                if strict:
-                    raise ValueError("invalid component ID")
-                return False
-            self.amounts[index][0] = new
-        if amount != None:
-            self.amounts[index][1] = value 
-        return True
+    def change_amounts(
+        self,
+        index: int,
+        component: Optional[str] = None,
+        amount: Optional[Numeric] = None,
+        strict: bool = False,
+    ) -> bool:
+        return self.cookbook.change_entry(
+            self, self.amounts, index, component, amount, strict
+        )
 
-    def new_component(self, id_name: str, amount: Numeric = Decimal(0), strict: bool = False) -> bool:
-        try:
-            value = num(amount)
-        except (ValueError, TypeError, ArithmeticError):
-            if strict:
-                raise ValueError("invalid amount")
-            return False
-        new = self.cookbook.link_component(self, id_name)
-        if new != None:
-            self.amounts.append([new, value])
-            return True
-        elif strict:
-            raise ValueError("invalid component ID")
-        else:
-            return False
+    def new_component(
+        self, id_name: str, amount: Numeric = Decimal(0), strict: bool = False
+    ) -> bool:
+        return self.cookbook.add_entry(self, self.amounts, id_name, amount, strict)
 
-    def get_amounts(self, servings: Union[Decimal, int] = 1) -> list[tuple[Union[Ingredient, Recipe], Decimal]]:
+    def get_amounts(
+        self, servings: Union[Decimal, int] = 1
+    ) -> list[tuple[Union[Ingredient, Recipe], Decimal]]:
         amounts = []
-        for (component, amount) in self.amounts:
+        for component, amount in self.amounts:
             amounts.append((component, amount * servings))
         return amounts
 
     def get_metric(self, metric: str, servings: Union[Decimal, int] = 1) -> Decimal:
         total = Decimal(0)
         amounts = self.get_amounts(servings)
-        for (component, amount) in amounts:
+        for component, amount in amounts:
             total += amount * component.get_metric(metric)
         return total
 
     def get_metrics(self, servings: Union[Decimal, int] = 1) -> dict[str, Decimal]:
-        return {metric: self.get_metric(metric, servings) for metric in self.cookbook.metrics}
+        return {
+            metric: self.get_metric(metric, servings)
+            for metric in self.cookbook.metrics
+        }
 
-    def get_seconds(self) -> float:
-        total_seconds: float = 0
-        for step in self.steps:
-            total_seconds += step.seconds
-        return total_seconds
+    def display_name(self) -> str:
+        return self.name if self.name else "Untitled recipe"
 
-    def get_time(self) -> str:
-        return time_string(self.get_seconds())
+    def choice_label(self) -> str:
+        return f"{self.display_name()} (recipe)"
 
-    def recipe_string(self, servings: Union[Decimal, int] = 1) -> str:
-        string = self.name
-        string += f"""
-Servings: {servings}
-"""
-        for metric in metric_strings(self.get_metrics(servings)):
-            string += f"{metric}\n"
-        time = time_string(self.get_seconds())
-        string += f"Preparation time: {time}\n"
+    def card(self, servings: Union[Decimal, int] = 1) -> dict[str, Any]:
+        ingredients = []
+        for component, amount in self.get_amounts(servings):
+            entry: dict[str, Any] = {
+                "name": component.display_name(),
+                "amount": json_number(amount),
+                "unit": component.unit,
+            }
+            if isinstance(component, Recipe):
+                entry["recipe"] = component.card(amount)
+            ingredients.append(entry)
+        return {
+            "name": self.display_name(),
+            "category": self.category,
+            "servings": json_number(Decimal(servings)),
+            "metrics": {
+                metric: json_number(value)
+                for metric, value in self.get_metrics(servings).items()
+            },
+            "metrics_per_serving": {
+                metric: json_number(value)
+                for metric, value in self.get_metrics().items()
+            },
+            "ingredients": ingredients,
+            "steps": list(self.steps),
+        }
 
-        string += "\nINGREDIENTS\n"
-        amounts = self.get_amounts(servings)
-        for ingredient, amount in amounts:
-            string += f"{amount} {ingredient.unit}  {ingredient.name}\n"
-
-        string += "\nMETHOD"
-        tot_seconds: float = 0
-        for step in self.steps:
-            string += f"\n- {step.description} ({time_string(step.seconds)})"
-            tot_seconds += step.seconds
-            string += f" >{time_string(tot_seconds)}"
-        return string
-
-    def __str__(self) -> str:
-        return self.recipe_string(servings = 1)
-    
     def __repr__(self) -> str:
         metrics = metric_strings(self.get_metrics(), "/serv")
         if not metrics:
@@ -198,19 +170,17 @@ Servings: {servings}
 
     def _col(self, col: int, metrics: list[str]) -> Optional[str]:
         if col == 0:
-            return self._id
-        elif col == 1:
             return self.name
-        elif col == 2:
+        elif col == 1:
             return self.category
-        elif col < 3 + len(metrics):
-            return num_string(self.get_metric(metrics[col - 3]))
-        elif col == 3 + len(metrics):
-            return self.get_time()
+        elif col < 2 + len(metrics):
+            return num_string(self.get_metric(metrics[col - 2]))
         else:
             return None
 
-    def get_ingredients(self, servings: Union[Decimal, int]) -> dict[Ingredient, Decimal]:
+    def get_ingredients(
+        self, servings: Union[Decimal, int]
+    ) -> dict[Ingredient, Decimal]:
         total: dict[Ingredient, Decimal] = {}
         for component, amount in self.amounts:
             add = component.get_ingredients(amount * servings)
@@ -222,246 +192,165 @@ Servings: {servings}
         return total
 
     def get_window(self) -> None:
-        if self.window == None:
+        if self.window is None:
             self.window = RecipeView(self, self.cookbook.window)
-        else:
-            self.window.refresh()
-        self.window.set_editing(False)
-        self.window.show()
+        self.window.open()
 
 
 class RecipeDashModel(DashboardTableModel):
     content: list[Recipe]
-    align = ["", "left"]
+    placeholders = {0: "Untitled recipe"}
 
     def __init__(self, parent: Optional[QWidget], cookbook: Cookbook) -> None:
         self.cookbook = cookbook
-        self.header_names = (["ID", "Recipe name", "Category"]
-            + cookbook.metrics + ["Prep. time", ""])
-        self.not_editable = list(range(3, len(self.header_names)))
+        self.header_names = (
+            ["Recipe name", "Category"]
+            + [f"{metric}/serv" for metric in cookbook.metrics]
+            + [""]
+        )
+        self.align = ["left", "left"] + ["right"] * len(cookbook.metrics)
+        self.not_editable = list(range(2, len(self.header_names)))
         super().__init__(parent, cookbook.recipes)
 
     def get_data(self, row: int, col: int) -> Optional[str]:
         recipe = self.content[row]
         return recipe._col(col, self.cookbook.metrics)
 
-
     def set_data(self, row: int, col: int, value: Any) -> bool:
         recipe = self.content[row]
         if col == 0:
-            self.cookbook.update_component_id(recipe, value) 
-        elif col == 1:
             recipe.name = value
             if recipe.window != None:
                 recipe.window.refresh_name()
-        elif col == 2:
-            recipe.category = value
-
-        return True       
-
-    def new_entry(self) -> None:
-        def create_function(new_id: str) -> bool:
-            rec = Recipe(new_id, self.cookbook)
-            return self.cookbook.register_recipe(rec)
-        create_new(cast(Optional[QWidget], self.parent()), "recipe", create_function)
-    
-    def delete_entry(self, row: int) -> None:
-        self.cookbook.delete_recipe(row, cast(Optional[QWidget], self.parent())) 
-
- 
-class RecipeDashTable(DashboardTable):
-    ModelClass = RecipeDashModel 
-    item_name = "recipe"
-    default_widths = [(0, 150), (2, 150)]
-    stretch_widths = [1]
-
-    def __init__(self, cookbook: Cookbook) -> None:
-        super().__init__(cookbook)
-        # One column per metric, followed by the preparation time
-        columns = list(range(3, self.model.ncols - 1))
-        self.resize_columns([(col, 100) for col in columns], columns, [])
-
-
-
-class RecipeView(QWidget):
-    def __init__(self, recipe: Recipe, parent: Optional[QWidget]) -> None:
-        super().__init__(parent = parent)
-        self.setWindowFlag(Qt.WindowType.Window)
-        self.resize(500, 700)
-        self.recipe = recipe
-
-        self.layout: QVBoxLayout = QVBoxLayout()  # type: ignore[assignment]
-        self.layout.setSpacing(0)
-        no_margin(self.layout)
-        self.heading = QVBoxLayout()
-        general_margin(self.heading)
-        self.setLayout(self.layout)
-
-        hbox = QHBoxLayout()
-        self.name_label = Title("")
-        self.main_metric_label = Title("")
-        self.time_label = Subtitle("")
-        self.other_metrics_label = Subtitle("")
-        hbox.addWidget(self.name_label)
-        hbox.addStretch(1)
-        hbox.addWidget(self.main_metric_label)
-        self.heading.addLayout(hbox)
-        self.heading.addWidget(self.time_label)
-        self.heading.addWidget(self.other_metrics_label)
-        self.layout.addLayout(self.heading)
-
-        self.refresh_name()
-
-        self.amounts_table = AmountsTable(self.recipe)
-        self.amounts_table.model.refresh.connect(self.refresh)
-        self.layout.addWidget(self.amounts_table)
-
-        self.steps_table = StepsTable(self.recipe.steps)
-        self.steps_table.model.refresh.connect(self.refresh)
-        self.layout.addWidget(self.steps_table)
-
-        self.controls = QHBoxLayout()
-        self.controls.setContentsMargins(15,15,15,15)
-        self.edit_button = QPushButton("")
-        self.edit_button.clicked.connect(self.toggle_edit)
-        self.set_editing(False)
-
-        self.controls.addStretch()
-        self.controls.addWidget(self.edit_button)
-
-        self.layout.addLayout(self.controls)
-        self.refresh()
-
-    def set_editing(self, edit: bool) -> None:
-        self.editing = edit
-        if edit:
-            self.edit_button.setText("Save")
-        else:
-            self.edit_button.setText("Edit")
-        self.steps_table.set_editable(edit)
-        self.amounts_table.set_editable(edit)
-
-    def toggle_edit(self) -> None:
-        self.set_editing(not self.editing)
-
-    def refresh(self) -> None:
-        set_metric_labels(self.main_metric_label, self.other_metrics_label,
-                          metric_strings(self.recipe.get_metrics()))
-        self.time_label.setText(f"Preparation time {self.recipe.get_time()}")
-
-    def refresh_name(self) -> None:
-        self.setWindowTitle(f"Recipe '{self.recipe.name}'")
-        self.name_label.setText(self.recipe.name)
-
-class StepsTableModel(CoreTableModel):
-    content: list[Step]
-    header_names = ["Step", "Duration", "End time"]
-    align = ["left", "", ""]
-    refresh = pyqtSignal()
-
-    def sum_seconds(self, row: int) -> float:
-        return sum([st.seconds for st in self.content[:row+1]])
-
-    def get_data(self, row: int, col: int) -> Optional[str]:
-        step = self.content[row]
-        if col == 0:
-            return step.description
         elif col == 1:
-            return time_string(step.seconds)
-        elif col == 2:
-            return time_string(self.sum_seconds(row))
-        return None
-   
-    def set_data(self, row: int, col: int, value: Any) -> bool:
-        step = self.content[row]
-        if col == 0:
-            step.description = value
-            return True
-        try:
-            value = parse_time(value)
-        except:
-            return False
-        if value < 0:
-            return False
-        if col == 1:
-            step.seconds = value
-        elif col == 2:
-            seconds = value - self.sum_seconds(row) + step.seconds
-            if seconds >= 0:
-                step.seconds = seconds
-            else:
-                return False
-        self.refresh.emit()
-        self.update_row(row)
-        self.update_col(2)
+            recipe.category = value
 
         return True
 
     def new_entry(self) -> None:
-        self.content.append(Step("", 0))
+        name = ask_name(cast(Optional[QWidget], self.parent()), "recipe")
+        if name is not None:
+            self.cookbook.register_recipe(Recipe(self.cookbook, name))
+
+    def delete_entry(self, row: int) -> None:
+        self.cookbook.delete_recipe(row, cast(Optional[QWidget], self.parent()))
+
+
+class RecipeDashTable(DashboardTable):
+    ModelClass = RecipeDashModel
+    item_name = "recipe"
+    default_widths = [(1, 120)]
+    stretch_widths = [0]
+
+    def __init__(self, cookbook: Cookbook) -> None:
+        super().__init__(cookbook)
+        self.resize_columns([], [], [], list(range(2, self.model.ncols - 1)))
+
+
+class RecipeView(DetailView):
+    metric_suffix = "/serv"
+
+    def __init__(self, recipe: Recipe, parent: Optional[QWidget]) -> None:
+        super().__init__(recipe, parent, 600, 760)
+        self.recipe = recipe
+
+        self.servings_box = ServingsBox()
+        self.servings_box.valueChanged.connect(lambda: self.update_servings())
+        self.servings_row = QWidget()
+        servings_layout = QHBoxLayout(self.servings_row)
+        no_margin(servings_layout)
+        servings_layout.addWidget(QLabel("Servings"))
+        servings_layout.addWidget(self.servings_box)
+        servings_layout.addStretch()
+        self.body.addWidget(self.servings_row)
+
+        self.amounts_table = AmountsTable(recipe, recipe.amounts)
+        self.amounts_table.model.refresh.connect(self.refresh)
+        self.amounts_table.model.modelReset.connect(self.refresh)
+        self.body.addWidget(self.amounts_table)
+
+        self.steps_table = StepsTable(recipe.steps)
+        self.body.addWidget(self.steps_table)
+
+        self.save_button = QPushButton("Save…")
+        self.save_button.clicked.connect(self.save_card)
+        self.controls.insertWidget(1, self.save_button)
+
+        self.set_editing(False)
+        self.refresh()
+
+    def set_editing(self, edit: bool) -> None:
+        super().set_editing(edit)
+        self.steps_table.set_editable(edit)
+        self.amounts_table.set_editable(edit)
+        self.servings_row.setVisible(not edit)
+        self.save_button.setVisible(not edit)
+        self.update_servings()
+
+    def update_servings(self) -> None:
+        self.amounts_table.model.set_servings(
+            Decimal(1) if self.editing else self.servings_box.servings()
+        )
+
+    def save_card(self) -> None:
+        servings = self.servings_box.servings()
+        plural = "serving" if servings == 1 else "servings"
+        name = f"{self.recipe.display_name()} ({exact_string(servings)} {plural}).json"
+        name = name.replace("/", "-")
+        folder = (
+            Path(self.recipe.cookbook.path).parent
+            if self.recipe.cookbook.path
+            else Path.home()
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save recipe", str(folder / name), "JSON (*.json)"
+        )
+        if not path:
+            return
+        if not path.endswith(".json"):
+            path += ".json"
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self.recipe.card(servings), f, indent=2, ensure_ascii=False)
+        except OSError as error:
+            show_error(self, f"Could not save {path}: {error}")
+
+
+class StepsTableModel(CoreTableModel):
+    content: list[str]
+    header_names = ["Step"]
+    align = ["left"]
+    placeholders = {0: "Insert a step…"}
+
+    def get_data(self, row: int, col: int) -> Optional[str]:
+        return self.content[row] if col == 0 else None
+
+    def set_data(self, row: int, col: int, value: Any) -> bool:
+        if col != 0:
+            return False
+        self.content[row] = value
+        return True
+
+    def new_entry(self) -> None:
+        self.content.append("")
 
     def delete_entry(self, row: int) -> None:
         del self.content[row]
+
 
 class StepsTable(FixTable):
     model: StepsTableModel
     ModelClass = StepsTableModel
     item_name = "step"
-    default_widths = [(1,100), (2,100)]
-    fixed_widths = [1,2]
     stretch_widths = [0]
 
+    def __init__(self, steps: list[str]) -> None:
+        super().__init__(steps)
+        self.table.setWordWrap(True)
+        self.table.setItemDelegateForColumn(0, TextDelegate(self.table))
+        rows = cast(QHeaderView, self.table.verticalHeader())
+        rows.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
 
-class AmountsTableModel(CoreTableModel):
-    content: list[list[Any]]
-    header_names = ["Ingredient", "Amount"]
-    align = ["right", ""]
-    refresh = pyqtSignal()
 
-    def __init__(self, parent: Optional[QWidget], recipe: Recipe) -> None:
-        self.recipe = recipe
-        self.cookbook = recipe.cookbook
-        super().__init__(parent, recipe.amounts)
-
-    def deep_data(self, row: int, col: int, is_display: bool) -> Optional[str]:
-        ing, amount = self.content[row]
-        if col == 0:
-            if is_display:
-                return ing.name
-            else:
-                return ing._id
-        elif col == 1:
-            if is_display:
-                return f"{amount} {ing.unit}"
-            else:
-                return str(amount)
-        return None
-   
-    def set_data(self, row: int, col: int, value: Any) -> bool:
-        if col == 0:
-            self.recipe.change_amounts(row, component = value)
-        elif col == 1:
-            self.recipe.change_amounts(row, amount = value)
-        else:
-            return False
-
-        self.refresh.emit()
-        return True
-
-    def new_entry(self) -> None:
-        new_id, ok = QInputDialog.getText(cast(Optional[QWidget], self.parent()), "New ingredient",
-            "Please specify the name of an ingredient or recipe:")
-        self.recipe.new_component(new_id) 
-
-    def delete_entry(self, row: int) -> None:
-        component = self.content[row][0]
-        self.cookbook.unlink_component(self.recipe, component)
-        del self.content[row]
-
-class AmountsTable(FixTable):
-    model: AmountsTableModel
-    ModelClass = AmountsTableModel
+class AmountsTable(EntriesTable):
     item_name = "ingredient"
-    default_widths = [(1,100),]
-    fixed_widths = [1]
-    stretch_widths = [0]

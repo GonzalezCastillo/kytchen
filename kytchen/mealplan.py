@@ -1,38 +1,69 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 if TYPE_CHECKING:
     from .cookbook import Cookbook
     from .ingredient import Ingredient
-    from .recipe import Recipe
 
 from decimal import Decimal
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QInputDialog, QWidget, QHBoxLayout, QVBoxLayout, QPushButton,
-    QLabel, QListWidget, QStackedWidget
+    QWidget,
+    QHBoxLayout,
+    QVBoxLayout,
+    QListWidget,
+    QStackedWidget,
 )
 from .views import (
-    DashboardTable, DashboardTableModel, CoreTableModel,
-    FixTable, CoreTable, num, num_string, metric_strings, set_metric_labels,
-    Numeric, Title, Subtitle, no_margin, general_margin
+    DashboardTable,
+    DashboardTableModel,
+    CoreTableModel,
+    EntriesTable,
+    DetailView,
+    CoreTable,
+    num_string,
+    amount_string,
+    metric_strings,
+    symbol_button,
+    Subtitle,
+    Heading,
+    no_margin,
 )
+
+
+DAY_LIST_STYLE = """
+QListWidget {
+    background: transparent;
+    border: none;
+    outline: 0;
+}
+QListWidget::item {
+    padding: 6px 8px;
+    border-radius: 6px;
+}
+QListWidget::item:hover:!selected {
+    background: rgba(128, 128, 128, 30);
+}
+QListWidget::item:selected {
+    background: palette(highlight);
+    color: palette(highlighted-text);
+}
+"""
 
 
 class Mealplan:
     def __init__(self, cookbook: Cookbook, name: str = "") -> None:
         self.name = name
-        self.cookbook = cookbook 
+        self.cookbook = cookbook
         self._days: list[list[list[Any]]] = []
-        self._shopping_list: dict[Ingredient, Decimal] = {}
         self.window: Optional[MealplanView] = None
 
     def export(self) -> dict[str, Any]:
         data: dict[str, Any] = {"name": self.name}
         days = []
         for day in self._days:
-            days.append([ [e[0]._id, str(e[1])] for e in day] )
+            days.append([[e[0]._id, str(e[1])] for e in day])
         data["days"] = days
         return data
 
@@ -42,121 +73,99 @@ class Mealplan:
         for day in data["days"]:
             new_day: list[list[Any]] = []
             for entry in day:
-                self._new_component(new_day, entry[0], entry[1], strict = True)
+                cookbook.add_entry(self, new_day, entry[0], entry[1], strict=True)
             self._days.append(new_day)
         return self
 
     def new_day(self) -> None:
         self._days.append([])
 
-    def _update_shopping(self, component: Union[Ingredient, Recipe], increase: Decimal = Decimal(0), decrease: Decimal = Decimal(0)) -> None:
-        if increase == Decimal(0) and decrease == Decimal(0):
-            return
-        net = increase - decrease
-        changes = component.get_ingredients(net)
-        for ingredient, amount in changes.items():
-            self._update_ingredient_shopping(ingredient, amount)
-        
-    def _update_ingredient_shopping(self, ingredient: Ingredient, net: Decimal) -> None:
-        self._shopping_list.setdefault(ingredient, Decimal(0))
-        self._shopping_list[ingredient] += net
-        if self._shopping_list[ingredient] == 0:
-            del self._shopping_list[ingredient]
+    def display_name(self) -> str:
+        return self.name if self.name else "Untitled meal plan"
 
-    def _new_component(self, day_list: list[list[Any]], component_id: str, amount: Numeric = Decimal(0), strict: bool = False) -> bool:
-        try:
-            amount = num(amount)
-        except:
-            if strict:
-                raise ValueError("invalid amount")
-            return False
-        component = self.cookbook.link_component(self, component_id)
-        if component != None:
-            day_list.append([component, amount])
-            self._update_shopping(component, increase = amount)
-            return True
-        if strict:
-            raise ValueError("invalid component ID")
-        return False
-
-    def _remove_component(self, day_list: list[list[Any]], index: int) -> None:
-        component, amount = day_list[index]
-        self.cookbook.unlink_component(self, component)
-        self._update_shopping(component, decrease = amount)
-        del day_list[index]
-
-    def _change_amount(self, day_list: list[list[Any]], index: int, new_amount: Numeric, strict: bool = False) -> bool:
-        component, old_amount = day_list[index]
-        try:
-            new_amount = num(new_amount)
-        except:
-            if strict:
-                raise ValueError("invalid amount")
-            return False
-        self._update_shopping(component, increase = new_amount, decrease = old_amount)
-        day_list[index][1] = new_amount
-        return True
-
-    def _change_component(self, day_list: list[list[Any]], index: int, new_id: str) -> None:
-        old_component, amount = day_list[index]
-        new_component = self.cookbook.link_component(self, new_id)
-        if new_component == None:
-            return
-        self.cookbook.unlink_component(self, old_component)
-        self._update_shopping(old_component, decrease = amount)
-        self._update_shopping(new_component, increase = amount)
-        day_list[index][0] = new_component
+    def get_ingredients(self) -> dict[Ingredient, Decimal]:
+        total: dict[Ingredient, Decimal] = {}
+        for day in self._days:
+            for component, amount in day:
+                for ingredient, value in component.get_ingredients(amount).items():
+                    total[ingredient] = total.get(ingredient, Decimal(0)) + value
+        return {ingredient: value for ingredient, value in total.items() if value != 0}
 
     def remove_day(self, day: int) -> None:
-        ls = self._days[day]
-        for i in range(len(ls)):
-            self._remove_component(ls, 0)
-        del self._days[day]
+        for component, _ in self._days.pop(day):
+            self.cookbook.unlink_component(self, component)
+
+    def move_day(self, day: int, offset: int) -> bool:
+        target = day + offset
+        if not (0 <= day < len(self._days) and 0 <= target < len(self._days)):
+            return False
+        self._days[day], self._days[target] = self._days[target], self._days[day]
+        return True
 
     def get_shopping_list(self) -> list[list[str]]:
         ls = []
-        for component, amount in self._shopping_list.items():
-            ls.append([component.name, str(amount)])
-        ls.sort(key = lambda entry: entry[0])
+        for component, amount in self.get_ingredients().items():
+            ls.append(
+                [
+                    component.display_name(),
+                    amount_string(num_string(amount), component.unit),
+                ]
+            )
+        ls.sort(key=lambda entry: entry[0].lower())
         return ls
 
-    def get_metric(self, metric: str) -> Decimal:
-        total = Decimal(0)
+    def get_metric(
+        self, metric: str, ingredients: Optional[dict[Ingredient, Decimal]] = None
+    ) -> Decimal:
         if len(self._days) == 0:
-            return total
-        for element, amount in self._shopping_list.items():
-            total += element.get_metric(metric) * amount
-         
+            return Decimal(0)
+        if ingredients is None:
+            ingredients = self.get_ingredients()
+        total = sum(
+            (
+                element.get_metric(metric) * amount
+                for element, amount in ingredients.items()
+            ),
+            Decimal(0),
+        )
         return total / len(self._days)
 
     def get_metrics(self) -> dict[str, Decimal]:
-        return {metric: self.get_metric(metric) for metric in self.cookbook.metrics}
+        ingredients = self.get_ingredients()
+        return {
+            metric: self.get_metric(metric, ingredients)
+            for metric in self.cookbook.metrics
+        }
+
+    def get_day_metrics(self, day: int) -> dict[str, Decimal]:
+        return {
+            metric: sum(
+                (
+                    component.get_metric(metric) * amount
+                    for component, amount in self._days[day]
+                ),
+                Decimal(0),
+            )
+            for metric in self.cookbook.metrics
+        }
 
     def __str__(self) -> str:
-        string = self.name
+        string = self.display_name()
         string += "\n\n"
         for i, day in enumerate(self._days):
             string += f"DAY {i + 1}"
             for item, amount in day:
-                string += f"\n- {item.name} ({amount} {item.unit})"
+                string += f"\n- {item.display_name()} ({amount_string(str(amount), item.unit)})"
         string += f"\nDaily average: {', '.join(metric_strings(self.get_metrics()))}\n"
         return string
 
     def __repr__(self) -> str:
         return self.name
 
-    def str_shopping_list(self) -> str:
-        string = "";
-        ingredients = self._shopping_list
-        for ing in ingredients:
-            string += f"{ing.name}: {ingredients[ing]} {ing.unit}\n"
-        return string
-
     def get_window(self) -> None:
-        if self.window == None:
+        if self.window is None:
             self.window = MealplanView(self, self.cookbook.window)
-        self.window.set_editing(False)
-        self.window.show()
+        self.window.open()
 
     def _clear(self) -> None:
         if self.window != None:
@@ -173,14 +182,17 @@ class Mealplan:
         else:
             return None
 
+
 class MealplanDashModel(DashboardTableModel):
     content: list[Mealplan]
-    align = ["left"]
+    placeholders = {0: "Untitled meal plan"}
 
     def __init__(self, parent: Optional[QWidget], cookbook: Cookbook) -> None:
         self.cookbook = cookbook
-        self.header_names = (["Meal plan name"]
-            + [f"{metric}/day" for metric in cookbook.metrics] + [""])
+        self.header_names = (
+            ["Meal plan name"] + [f"{metric}/day" for metric in cookbook.metrics] + [""]
+        )
+        self.align = ["left"] + ["right"] * len(cookbook.metrics)
         self.not_editable = list(range(1, len(self.header_names)))
         super().__init__(parent, cookbook.mealplans)
 
@@ -194,221 +206,200 @@ class MealplanDashModel(DashboardTableModel):
             mealplan.name = value
             if mealplan.window != None:
                 mealplan.window.refresh_name()
-        return True       
+        return True
 
     def new_entry(self) -> None:
-        mealplan = Mealplan(self.cookbook) 
+        mealplan = Mealplan(self.cookbook)
+        mealplan.new_day()
         self.cookbook.register_mealplan(mealplan)
-    
-    def delete_entry(self, row: int) -> None:
-        self.cookbook.delete_mealplan(row) 
 
- 
+    def delete_entry(self, row: int) -> None:
+        self.cookbook.delete_mealplan(row, cast(Optional[QWidget], self.parent()))
+
+
 class MealplanDashTable(DashboardTable):
-    ModelClass = MealplanDashModel 
+    ModelClass = MealplanDashModel
     item_name = "meal plan"
     stretch_widths = [0]
 
-class MealplanView(QWidget):
+    def __init__(self, cookbook: Cookbook) -> None:
+        super().__init__(cookbook)
+        self.resize_columns([], [], [], list(range(1, self.model.ncols - 1)))
+
+
+class MealplanView(DetailView):
+    metric_suffix = "/day"
+
     def __init__(self, mealplan: Mealplan, parent: Optional[QWidget]) -> None:
-        super().__init__(parent = parent)
-        self.setWindowFlag(Qt.WindowType.Window)
-        self.resize(600, 700)
+        super().__init__(mealplan, parent, 600, 700)
         self.mealplan = mealplan
-
-        self.layout: QVBoxLayout = QVBoxLayout()  # type: ignore[assignment]
-        self.setLayout(self.layout)
-        no_margin(self.layout)
-        self.layout.setSpacing(0)
-
-        name = self.mealplan.name
-        if name == "":
-            name = "Untitled meal plan"
-
-        heading = QVBoxLayout()
-        general_margin(heading)
-        hbox = QHBoxLayout()
-        self.name_label = Title(f"")
-        self.main_metric_label = Title("")
-        self.other_metrics_label = Subtitle("")
-        hbox.addWidget(self.name_label)
-        hbox.addStretch(1)
-        hbox.addWidget(self.main_metric_label)
-        heading.addLayout(hbox)
-        heading.addWidget(self.other_metrics_label)
-        self.layout.addLayout(heading)
-
-        self.refresh_name()
 
         self.shopping_view = ShoppingListTable(self.mealplan.get_shopping_list())
         self.main_layout = QHBoxLayout()
-        self.layout.addLayout(self.main_layout)
+        self.main_layout.setSpacing(10)
+        self.body.addLayout(self.main_layout)
         self.sidebar_container = QVBoxLayout()
+        self.sidebar_container.setSpacing(10)
         self.sidebar = QListWidget()
-        self.sidebar.setMaximumWidth(120)
+        self.sidebar.setFixedWidth(140)
+        self.sidebar.setStyleSheet(DAY_LIST_STYLE)
         self.sidebar_container.addWidget(self.sidebar)
         self.sidebar.currentRowChanged.connect(self.menu_action)
         self.sidebar_buttons_widget = QWidget()
         self.sidebar_buttons = QHBoxLayout(self.sidebar_buttons_widget)
         no_margin(self.sidebar_buttons)
-        self.sidebar_buttons.setSpacing(0)
         self.sidebar_container.addWidget(self.sidebar_buttons_widget)
-        self.button_add = QPushButton("+")
-        self.button_remove = QPushButton("-")
-        self.button_add.setMaximumWidth(40)
-        self.button_remove.setMaximumWidth(40)
+        self.button_add = symbol_button("+", "New day")
+        self.button_remove = symbol_button("−", "Remove the selected day")
+        self.button_up = symbol_button("↑", "Move the selected day up")
+        self.button_down = symbol_button("↓", "Move the selected day down")
         self.button_add.clicked.connect(self.new_day)
         self.button_remove.clicked.connect(self.remove_day)
-        self.sidebar_buttons.addWidget(
-            self.button_remove,alignment=Qt.AlignmentFlag.AlignRight)
-        self.sidebar_buttons.addWidget(
-            self.button_add, alignment=Qt.AlignmentFlag.AlignRight)
+        self.button_up.clicked.connect(lambda: self.move_day(-1))
+        self.button_down.clicked.connect(lambda: self.move_day(1))
+        self.sidebar_buttons.setSpacing(4)
+        self.sidebar_buttons_widget.setFixedWidth(self.sidebar.width())
+        self.sidebar_buttons.addWidget(self.button_add)
+        self.sidebar_buttons.addWidget(self.button_remove)
+        self.sidebar_buttons.addStretch()
+        self.sidebar_buttons.addWidget(self.button_up)
+        self.sidebar_buttons.addWidget(self.button_down)
 
         self.stack = QStackedWidget()
+        self.page_title = Heading("")
+        self.page_details = Subtitle("")
+        page_heading = QHBoxLayout()
+        page_heading.setSpacing(10)
+        page_heading.addWidget(
+            self.page_title, alignment=Qt.AlignmentFlag.AlignBaseline
+        )
+        page_heading.addWidget(
+            self.page_details, alignment=Qt.AlignmentFlag.AlignBaseline
+        )
+        page_heading.addStretch()
+        content = QVBoxLayout()
+        content.setSpacing(10)
+        content.addLayout(page_heading)
+        content.addWidget(self.stack)
         self.main_layout.addLayout(self.sidebar_container)
-        self.main_layout.addWidget(self.stack)
+        self.main_layout.addLayout(content, 1)
 
         self.sidebar.addItems(["Shopping list"])
         self.stack.addWidget(self.shopping_view)
         self.views: list[MealplanDayTable] = []
-        for i in range(len(self.mealplan._days)):
-            self.sidebar.addItem(f"Day {i + 1}")
-            view = MealplanDayTable(self.mealplan, i)
-            self.views.append(view)
-            self.stack.addWidget(view)
-            view.model.refresh.connect(self.refresh)
+        for day in self.mealplan._days:
+            self.add_day_view(day)
+        self.sidebar.setCurrentRow(0)
 
-
-        self.controls = QHBoxLayout()
-        general_margin(self.controls)
-        self.edit_button = QPushButton("")
-        self.edit_button.clicked.connect(self.toggle_edit)
         self.set_editing(False)
-
-        self.controls.addStretch()
-        self.controls.addWidget(self.edit_button)
-
-        self.layout.addLayout(self.controls)
         self.refresh()
 
     def menu_action(self, index: int) -> None:
-        if index == 0:
-            self.shopping_view.model.beginResetModel()
-            self.shopping_view.model.content = self.mealplan.get_shopping_list()
-            self.shopping_view.model.endResetModel()
         self.stack.setCurrentIndex(index)
+        self.refresh_page()
+
+    def add_day_view(self, day: list[list[Any]]) -> None:
+        view = MealplanDayTable(self.mealplan, day)
+        view.set_editable(self.editing)
+        view.model.refresh.connect(self.refresh)
+        view.model.modelReset.connect(self.refresh)
+        self.views.append(view)
+        self.stack.addWidget(view)
+        self.sidebar.addItem(f"Day {len(self.views)}")
 
     def new_day(self) -> None:
         self.mealplan.new_day()
-        day = len(self.mealplan._days)
-        self.sidebar.addItem(f"Day {day}")
-        view = MealplanDayTable(self.mealplan, day - 1)
-        view.set_editable(self.editing)
-        self.views.append(view)
-        view.model.refresh.connect(self.refresh)
-        self.stack.addWidget(view)
+        self.add_day_view(self.mealplan._days[-1])
+        self.refresh()
+
+    def selected_day(self) -> Optional[int]:
+        row = self.sidebar.currentRow()
+        return row - 1 if row >= 1 else None
+
+    def reload_days(self) -> None:
+        for view, day in zip(self.views, self.mealplan._days):
+            view.model.beginResetModel()
+            view.model.content = day
+            view.model.endResetModel()
 
     def remove_day(self) -> None:
-        if len(self.mealplan._days) == 0:
+        day = self.selected_day()
+        if day is None:
             return
-        last = len(self.mealplan._days) - 1
-        label = self.sidebar.takeItem(last + 1)
-        del label
+        self.mealplan.remove_day(day)
+        self.sidebar.takeItem(self.sidebar.count() - 1)
         view = self.views.pop()
         self.stack.removeWidget(view)
         view.deleteLater()
-        self.mealplan.remove_day(last)
+        self.reload_days()
+        self.sidebar.setCurrentRow(min(day + 1, len(self.views)))
+        self.refresh()
+
+    def move_day(self, offset: int) -> None:
+        day = self.selected_day()
+        if day is None or not self.mealplan.move_day(day, offset):
+            return
+        self.reload_days()
+        self.sidebar.setCurrentRow(day + offset + 1)
+        self.refresh()
+
+    def update_day_buttons(self) -> None:
+        day = self.selected_day()
+        self.button_remove.setEnabled(day is not None)
+        self.button_up.setEnabled(day is not None and day > 0)
+        self.button_down.setEnabled(
+            day is not None and day < len(self.mealplan._days) - 1
+        )
 
     def set_editing(self, edit: bool) -> None:
-        self.editing = edit
-        if edit:
-            self.edit_button.setText("Save")
-        else:
-            self.edit_button.setText("Edit")
+        super().set_editing(edit)
         for view in self.views:
             view.set_editable(edit)
         self.sidebar_buttons_widget.setVisible(edit)
 
-    def toggle_edit(self) -> None:
-        self.set_editing(not self.editing)
-
     def refresh(self) -> None:
-        set_metric_labels(self.main_metric_label, self.other_metrics_label,
-                          metric_strings(self.mealplan.get_metrics(), "/day"))
+        super().refresh()
+        self.shopping_view.model.beginResetModel()
+        self.shopping_view.model.content = self.mealplan.get_shopping_list()
+        self.shopping_view.model.endResetModel()
+        self.refresh_page()
 
-    def refresh_name(self) -> None:
-        self.setWindowTitle(f"Meal plan '{self.mealplan.name}'")
-        self.name_label.setText(self.mealplan.name)
-
-class MealplanDayModel(CoreTableModel):
-    content: list[list[Any]]
-    header_names = ["Meal", "Amount"]
-    align = ["right", ""]
-    refresh = pyqtSignal()
-
-    def __init__(self, parent: Optional[QWidget], content: tuple[Mealplan, int]) -> None:
-        self.mealplan, day = content
-        super().__init__(parent, self.mealplan._days[day])
-
-    def deep_data(self, row: int, col: int, is_display: bool) -> Optional[str]:
-        ing, amount = self.content[row]
-        if col == 0:
-            if is_display:
-                return ing.name
-            else:
-                return ing._id
-        elif col == 1:
-            if is_display:
-                return f"{amount} {ing.unit}"
-            else:
-                return str(amount)
-        return None
-   
-    def set_data(self, row: int, col: int, value: Any) -> bool:
-        comp, _ = self.content[row]
-        if col == 0:
-            self.mealplan._change_component(self.content, row, value)
-        elif col == 1:
-            self.mealplan._change_amount(self.content, row, value) 
+    def refresh_page(self) -> None:
+        self.update_day_buttons()
+        index = self.stack.currentIndex()
+        if index <= 0:
+            count = len(self.shopping_view.model.content)
+            self.page_title.setText("Shopping list")
+            self.page_details.setText(
+                f"{count} ingredient{'' if count == 1 else 's'}" if count else ""
+            )
         else:
-            return False
+            self.page_title.setText(f"Day {index}")
+            self.page_details.setText(
+                " · ".join(metric_strings(self.mealplan.get_day_metrics(index - 1)))
+            )
 
-        self.refresh.emit()
-        return True
 
-    def new_entry(self) -> None:
-        new_id, ok = QInputDialog.getText(cast(Optional[QWidget], self.parent()), "New meal",
-            "Please specify the name of an ingredient or recipe:")
-        self.mealplan._new_component(self.content, new_id)
-
-    def delete_entry(self, row: int) -> None:
-        self.mealplan._remove_component(self.content, row)
-
-class MealplanDayTable(FixTable):
-    model: MealplanDayModel
-    ModelClass = MealplanDayModel
+class MealplanDayTable(EntriesTable):
     item_name = "meal"
-    default_widths = [(1,100),]
-    fixed_widths = [1]
-    stretch_widths = [0]
-
-    def __init__(self, mealplan: Mealplan, day: int) -> None:
-        super().__init__((mealplan, day))
+    empty_message = "No meals planned for this day yet."
 
 
 class ShoppingListModel(CoreTableModel):
     content: list[list[str]]
     header_names = ["Ingredient", "Amount"]
-    align = ["right", ""]
+    align = ["left", "right"]
     not_editable = [0, 1]
-    
+
     def get_data(self, row: int, col: int) -> Optional[str]:
         return self.content[row][col]
+
 
 class ShoppingListTable(CoreTable):
     model: ShoppingListModel
     ModelClass = ShoppingListModel
     item_name = None
-    default_widths = [(1,100),]
+    empty_message = "Nothing to buy yet. Add some meals to your days."
+    default_widths = [(1, 130)]
     fixed_widths = [1]
     stretch_widths = [0]

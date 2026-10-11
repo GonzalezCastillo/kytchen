@@ -26,6 +26,7 @@ dependencies = ["PyQt6>=6.6.0,<7.0.0"]
 [tool.hatch.build.targets.sdist]
 include = [
 	"kytchen/*.py",
+	"kytchen/*.png",
 ]
 
 [project.urls]
@@ -37,3 +38,11 @@ path = "kytchen/__init__.py"
 
 [project.gui-scripts]
 kytchen = "kytchen.app:main"
+
+[tool.ruff.format]
+skip-magic-trailing-comma = true
+
+[tool.ruff.lint.isort]
+force-single-line = false
+combine-as-imports = true
+split-on-trailing-comma = false

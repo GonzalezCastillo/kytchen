@@ -7,25 +7,47 @@ if TYPE_CHECKING:
 
 import json
 from decimal import Decimal
+from pathlib import Path
 
 from .ingredient import Ingredient
 from .recipe import Recipe
 from .mealplan import Mealplan
-from .views import show_error, ask_confirmation
+from .views import show_error, ask_confirmation, num, Numeric
 
 DEFAULT_METRICS = ["kcal"]
 
-def can_delete_component(component: Union[Ingredient, Recipe], view: Optional[QWidget] = None) -> bool:
+
+def parse_amount(amount: Numeric, strict: bool) -> Optional[Decimal]:
+    try:
+        return num(amount)
+    except (ValueError, TypeError, ArithmeticError):
+        if strict:
+            raise ValueError("invalid amount")
+        return None
+
+
+def can_delete_component(
+    component: Union[Ingredient, Recipe], view: Optional[QWidget] = None
+) -> bool:
     if component._used:
         if view:
-            used_name = list(component._used.keys())[0].name
-            show_error(view,
-                f"Cannot delete {component.name}. It is used in {used_name}.")
+            used_name = list(component._used.keys())[0].display_name()
+            show_error(
+                view,
+                f"Cannot delete {component.display_name()}. It is used in {used_name}.",
+            )
         return False
     else:
         return True
 
-class Cookbook():
+
+def confirm_delete(kind: str, name: str, view: Optional[QWidget]) -> bool:
+    return view is None or ask_confirmation(
+        view, f"Delete the {kind} '{name}'? This cannot be undone."
+    )
+
+
+class Cookbook:
     def __init__(self) -> None:
         self._components: dict[str, Union[Ingredient, Recipe]] = {}
         self.metrics: list[str] = list(DEFAULT_METRICS)
@@ -41,7 +63,7 @@ class Cookbook():
             data = json.load(f)
         self = cls()
         self.metrics.clear()
-        for metric in data.get("metrics", DEFAULT_METRICS):
+        for metric in data["metrics"]:
             if not self.add_metric(metric):
                 raise ValueError("invalid or duplicate metric")
         for ing in data["ingredients"]:
@@ -61,7 +83,12 @@ class Cookbook():
         return self
 
     def save(self, path: Optional[str] = None) -> None:
-        data: dict[str, list[Any]] = {"metrics": list(self.metrics), "ingredients": [], "recipes": [], "mealplans": []}
+        data: dict[str, list[Any]] = {
+            "metrics": list(self.metrics),
+            "ingredients": [],
+            "recipes": [],
+            "mealplans": [],
+        }
         for ing in self.ingredients:
             data["ingredients"].append(ing.export())
         for rec in self.recipes:
@@ -80,7 +107,7 @@ class Cookbook():
 
     def get_name(self) -> str:
         if self.path != None:
-            return self.path.split("/")[-1].split("\\")[-1].strip(".js")
+            return Path(self.path).stem
         else:
             return "New cookbook"
 
@@ -105,8 +132,15 @@ class Cookbook():
     def delete_metric(self, index: int, view: Optional[QWidget] = None) -> bool:
         metric = self.metrics[index]
         used = any(ing.get_metric(metric) != 0 for ing in self.ingredients)
-        if used and view and not ask_confirmation(view,
-                f"Remove the metric '{metric}'? Its values will be deleted from all ingredients."):
+        if (
+            used
+            and view
+            and not ask_confirmation(
+                view,
+                f"Remove the metric '{metric}'? Its values will be deleted from all ingredients.",
+                "Remove",
+            )
+        ):
             return False
         del self.metrics[index]
         for ing in self.ingredients:
@@ -136,22 +170,19 @@ class Cookbook():
     def register_mealplan(self, mealplan: Mealplan) -> None:
         self.mealplans.append(mealplan)
 
-    def update_component_id(self, component: Union[Ingredient, Recipe], new: str) -> bool:
-        if new in self._components:
-            return False
-        self._components[new] = self._components.pop(component._id)
-        component._id = new
-        return True
-
     def delete_ingredient(self, index: int, view: Optional[QWidget] = None) -> None:
         ing = self.ingredients[index]
-        if can_delete_component(ing, view):
+        if can_delete_component(ing, view) and confirm_delete(
+            "ingredient", ing.display_name(), view
+        ):
             del self.ingredients[index]
             del self._components[ing._id]
 
     def delete_recipe(self, index: int, view: Optional[QWidget] = None) -> None:
         recipe = self.recipes[index]
-        if not can_delete_component(recipe, view):
+        if not can_delete_component(recipe, view) or not confirm_delete(
+            "recipe", recipe.display_name(), view
+        ):
             return
         if recipe.window != None:
             recipe.window.deleteLater()
@@ -161,12 +192,16 @@ class Cookbook():
         del self.recipes[index]
         del self._components[recipe._id]
 
-    def delete_mealplan(self, index: int) -> None:
+    def delete_mealplan(self, index: int, view: Optional[QWidget] = None) -> None:
         mealplan = self.mealplans[index]
+        if not confirm_delete("meal plan", mealplan.display_name(), view):
+            return
         mealplan._clear()
         del self.mealplans[index]
 
-    def link_component(self, origin: Union[Recipe, Mealplan], name_id: str) -> Optional[Union[Ingredient, Recipe]]:
+    def link_component(
+        self, origin: Union[Recipe, Mealplan], name_id: str
+    ) -> Optional[Union[Ingredient, Recipe]]:
         if name_id in self._components:
             obj = self._components[name_id]
             pending = [obj]
@@ -186,17 +221,72 @@ class Cookbook():
         else:
             return None
 
-    def unlink_component(self, origin: Union[Recipe, Mealplan], old: Union[Ingredient, Recipe]) -> None:
+    def unlink_component(
+        self, origin: Union[Recipe, Mealplan], old: Union[Ingredient, Recipe]
+    ) -> None:
         old._used[origin] -= 1
         if old._used[origin] == 0:
             del old._used[origin]
 
-    def change_link(self, origin: Union[Recipe, Mealplan], old: Union[Ingredient, Recipe], new_id: str) -> Optional[Union[Ingredient, Recipe]]:
+    def change_link(
+        self,
+        origin: Union[Recipe, Mealplan],
+        old: Union[Ingredient, Recipe],
+        new_id: str,
+    ) -> Optional[Union[Ingredient, Recipe]]:
         new = self.link_component(origin, new_id)
         if new:
             self.unlink_component(origin, old)
             return new
         return None
+
+    def add_entry(
+        self,
+        origin: Union[Recipe, Mealplan],
+        entries: list[list[Any]],
+        component_id: str,
+        amount: Numeric = Decimal(0),
+        strict: bool = False,
+    ) -> bool:
+        value = parse_amount(amount, strict)
+        if value is None:
+            return False
+        component = self.link_component(origin, component_id)
+        if component is None:
+            if strict:
+                raise ValueError("invalid component ID")
+            return False
+        entries.append([component, value])
+        return True
+
+    def change_entry(
+        self,
+        origin: Union[Recipe, Mealplan],
+        entries: list[list[Any]],
+        index: int,
+        component_id: Optional[str] = None,
+        amount: Optional[Numeric] = None,
+        strict: bool = False,
+    ) -> bool:
+        value = None if amount is None else parse_amount(amount, strict)
+        if amount is not None and value is None:
+            return False
+        if component_id is not None:
+            component = self.change_link(origin, entries[index][0], component_id)
+            if component is None:
+                if strict:
+                    raise ValueError("invalid component ID")
+                return False
+            entries[index][0] = component
+        if value is not None:
+            entries[index][1] = value
+        return True
+
+    def remove_entry(
+        self, origin: Union[Recipe, Mealplan], entries: list[list[Any]], index: int
+    ) -> None:
+        self.unlink_component(origin, entries[index][0])
+        del entries[index]
 
     def is_empty(self) -> bool:
         return len(self._components) == 0

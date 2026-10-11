@@ -3,4 +3,3 @@ from kytchen.recipe import *
 from kytchen.mealplan import *
 
 __version__ = "1.0.0-alpha2"
-
