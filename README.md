@@ -3,7 +3,7 @@
 This is a simple Python utility for handling recipes and meal plans. These are the capabilities of the package in terms of recipes:
 
 - Design recipes modularly, referencing other recipes and a common collection of ingredients that you can keep in a CSV file.
-- Keep track of the caloric content of every recipe with the information that you provide on the energetic content of the ingredients that you use.
+- Keep track of the caloric content of every recipe with the information that you provide on the energetic content of the ingredients that you use. You can also define your own metrics in each cookbook (protein, fibre, cost...) and Kytchen will keep track of them as well.
 - Scale your recipes for different serving sizes.
 - Help you estimate cooking times.
 - Design your recipes interactively in Python and save them as JSON files for future use.
@@ -11,7 +11,7 @@ This is a simple Python utility for handling recipes and meal plans. These are t
 In terms of meal plans, this is what Kytchen can achieve:
 
 - Help you efficiently organise and plan your cooking.
-- Keep track of your average daily caloric intake.
+- Keep track of your average daily caloric intake, and of any other metric that you define.
 - Generate a shopping list for every meal plan.
 
 ## Installation

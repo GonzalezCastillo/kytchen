@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Optional, Union
 from PyQt6.QtWidgets import QWidget
 
@@ -10,7 +11,9 @@ from decimal import Decimal
 from .ingredient import Ingredient
 from .recipe import Recipe
 from .mealplan import Mealplan
-from .views import show_error
+from .views import show_error, ask_confirmation
+
+DEFAULT_METRICS = ["kcal"]
 
 def can_delete_component(component: Union[Ingredient, Recipe], view: Optional[QWidget] = None) -> bool:
     if component._used:
@@ -25,6 +28,7 @@ def can_delete_component(component: Union[Ingredient, Recipe], view: Optional[QW
 class Cookbook():
     def __init__(self) -> None:
         self._components: dict[str, Union[Ingredient, Recipe]] = {}
+        self.metrics: list[str] = list(DEFAULT_METRICS)
         self.ingredients: list[Ingredient] = []
         self.recipes: list[Recipe] = []
         self.mealplans: list[Mealplan] = []
@@ -36,6 +40,10 @@ class Cookbook():
         with open(path, "r") as f:
             data = json.load(f)
         self = cls()
+        self.metrics.clear()
+        for metric in data.get("metrics", DEFAULT_METRICS):
+            if not self.add_metric(metric):
+                raise ValueError("invalid or duplicate metric")
         for ing in data["ingredients"]:
             ing = Ingredient.load(ing)
             if not self.register_ingredient(ing):
@@ -53,7 +61,7 @@ class Cookbook():
         return self
 
     def save(self, path: Optional[str] = None) -> None:
-        data: dict[str, list[dict[str, Any]]] = {"ingredients": [], "recipes": [], "mealplans": []}
+        data: dict[str, list[Any]] = {"metrics": list(self.metrics), "ingredients": [], "recipes": [], "mealplans": []}
         for ing in self.ingredients:
             data["ingredients"].append(ing.export())
         for rec in self.recipes:
@@ -75,6 +83,35 @@ class Cookbook():
             return self.path.split("/")[-1].split("\\")[-1].strip(".js")
         else:
             return "New cookbook"
+
+    def add_metric(self, metric: str) -> bool:
+        metric = metric.strip()
+        if metric == "" or metric in self.metrics:
+            return False
+        self.metrics.append(metric)
+        return True
+
+    def rename_metric(self, index: int, new: str) -> bool:
+        new = new.strip()
+        if new == "" or new in self.metrics:
+            return False
+        old = self.metrics[index]
+        self.metrics[index] = new
+        for ing in self.ingredients:
+            if old in ing.metrics:
+                ing.metrics[new] = ing.metrics.pop(old)
+        return True
+
+    def delete_metric(self, index: int, view: Optional[QWidget] = None) -> bool:
+        metric = self.metrics[index]
+        used = any(ing.get_metric(metric) != 0 for ing in self.ingredients)
+        if used and view and not ask_confirmation(view,
+                f"Remove the metric '{metric}'? Its values will be deleted from all ingredients."):
+            return False
+        del self.metrics[index]
+        for ing in self.ingredients:
+            ing.metrics.pop(metric, None)
+        return True
 
     def register_component(self, component: Union[Ingredient, Recipe]) -> bool:
         if component._id in self._components:

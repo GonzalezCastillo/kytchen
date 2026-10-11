@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Optional, cast
 import sys, os
 from pathlib import Path
@@ -13,6 +14,7 @@ from .cookbook import Cookbook
 from .ingredient import IngredientTable
 from .recipe import RecipeDashTable
 from .mealplan import MealplanDashTable
+from .metric import MetricTable
 from .views import Title, Subtitle, show_error, general_margin, ClickLabel
 from . import __version__
 
@@ -185,7 +187,7 @@ class MainWindow(QMainWindow):
         sidebar_layout.setContentsMargins(0,SIDEBAR_MARGIN,0,SIDEBAR_MARGIN)
 
         sidebar = QListWidget()
-        sidebar.addItems(["Home", "Ingredients", "Recipes", "Meal plans"])
+        sidebar.addItems(["Home", "Ingredients", "Recipes", "Meal plans", "Metrics"])
         sidebar.currentRowChanged.connect(self.menu_action)
         sidebar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.sidebar = sidebar
@@ -215,16 +217,38 @@ class MainWindow(QMainWindow):
             widget.deleteLater()
         self.setWindowTitle(f"Kytchen - {cookbook.get_name()}")
         self.cookbook = cookbook
+        metric_table = MetricTable(cookbook)
+        metric_table.model.changed.connect(self.refresh_metrics)
         self.views = [
             HomeView(self, cookbook),
-            IngredientTable(cookbook),
-            RecipeDashTable(cookbook),
-            MealplanDashTable(cookbook)
+            *self.metric_views(),
+            metric_table
         ]
         for view in self.views:
             self.stack.addWidget(view)
         self.cookbook.window = self
         self.sidebar.setCurrentRow(0)
+
+    def metric_views(self) -> list[QWidget]:
+        return [
+            IngredientTable(self.cookbook),
+            RecipeDashTable(self.cookbook),
+            MealplanDashTable(self.cookbook)
+        ]
+
+    def refresh_metrics(self) -> None:
+        for index, view in enumerate(self.metric_views(), start = 1):
+            old = self.views[index]
+            self.views[index] = view
+            self.stack.insertWidget(index, view)
+            self.stack.removeWidget(old)
+            old.deleteLater()
+        for recipe in self.cookbook.recipes:
+            if recipe.window != None:
+                recipe.window.refresh()
+        for mealplan in self.cookbook.mealplans:
+            if mealplan.window != None:
+                mealplan.window.refresh()
 
     def save_update(self) -> None:
         if safe_save(self.cookbook, please = True):

@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Optional, Union, cast
 
 if TYPE_CHECKING:
@@ -5,7 +6,6 @@ if TYPE_CHECKING:
     from .ingredient import Ingredient
     from .recipe import Recipe
 
-import math
 from decimal import Decimal
 
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -15,7 +15,8 @@ from PyQt6.QtWidgets import (
 )
 from .views import (
     DashboardTable, DashboardTableModel, CoreTableModel,
-    FixTable, CoreTable, num, Numeric, Title, no_margin, general_margin
+    FixTable, CoreTable, num, num_string, metric_strings, set_metric_labels,
+    Numeric, Title, Subtitle, no_margin, general_margin
 )
 
 
@@ -119,14 +120,17 @@ class Mealplan:
         ls.sort(key = lambda entry: entry[0])
         return ls
 
-    def get_calories(self) -> Union[Decimal, int]:
-        calories = Decimal(0)
+    def get_metric(self, metric: str) -> Decimal:
+        total = Decimal(0)
         if len(self._days) == 0:
-            return calories
+            return total
         for element, amount in self._shopping_list.items():
-            calories += element.get_calories() * amount
+            total += element.get_metric(metric) * amount
          
-        return math.ceil(calories / len(self._days))
+        return total / len(self._days)
+
+    def get_metrics(self) -> dict[str, Decimal]:
+        return {metric: self.get_metric(metric) for metric in self.cookbook.metrics}
 
     def __str__(self) -> str:
         string = self.name
@@ -135,7 +139,7 @@ class Mealplan:
             string += f"DAY {i + 1}"
             for item, amount in day:
                 string += f"\n- {item.name} ({amount} {item.unit})"
-        string += f"Average daily energy: {self.get_calories()} kcal\n"
+        string += f"\nDaily average: {', '.join(metric_strings(self.get_metrics()))}\n"
         return string
 
     def __repr__(self) -> str:
@@ -161,27 +165,28 @@ class Mealplan:
         for i in range(len(self._days)):
             self.remove_day(0)
 
-    def _col(self, col: int) -> Optional[str]:
+    def _col(self, col: int, metrics: list[str]) -> Optional[str]:
         if col == 0:
             return self.name
-        elif col == 1:
-            return str(self.get_calories())
+        elif col <= len(metrics):
+            return num_string(self.get_metric(metrics[col - 1]))
         else:
             return None
 
 class MealplanDashModel(DashboardTableModel):
     content: list[Mealplan]
-    header_names = ["Meal plan name", "kcal/day", ""]
-    align = ["left", "", ""]
-    not_editable = [1,2]
+    align = ["left"]
 
     def __init__(self, parent: Optional[QWidget], cookbook: Cookbook) -> None:
         self.cookbook = cookbook
+        self.header_names = (["Meal plan name"]
+            + [f"{metric}/day" for metric in cookbook.metrics] + [""])
+        self.not_editable = list(range(1, len(self.header_names)))
         super().__init__(parent, cookbook.mealplans)
 
     def get_data(self, row: int, col: int) -> Optional[str]:
-        recipe = self.content[row]
-        return recipe._col(col)
+        mealplan = self.content[row]
+        return mealplan._col(col, self.cookbook.metrics)
 
     def set_data(self, row: int, col: int, value: Any) -> bool:
         mealplan = self.content[row]
@@ -220,14 +225,18 @@ class MealplanView(QWidget):
         if name == "":
             name = "Untitled meal plan"
 
+        heading = QVBoxLayout()
+        general_margin(heading)
         hbox = QHBoxLayout()
-        general_margin(hbox)
         self.name_label = Title(f"")
-        self.kcal_label = Title("")
+        self.main_metric_label = Title("")
+        self.other_metrics_label = Subtitle("")
         hbox.addWidget(self.name_label)
         hbox.addStretch(1)
-        hbox.addWidget(self.kcal_label)
-        self.layout.addLayout(hbox)
+        hbox.addWidget(self.main_metric_label)
+        heading.addLayout(hbox)
+        heading.addWidget(self.other_metrics_label)
+        self.layout.addLayout(heading)
 
         self.refresh_name()
 
@@ -324,7 +333,8 @@ class MealplanView(QWidget):
         self.set_editing(not self.editing)
 
     def refresh(self) -> None:
-        self.kcal_label.setText(f"{self.mealplan.get_calories()} kcal/day")
+        set_metric_labels(self.main_metric_label, self.other_metrics_label,
+                          metric_strings(self.mealplan.get_metrics(), "/day"))
 
     def refresh_name(self) -> None:
         self.setWindowTitle(f"Meal plan '{self.mealplan.name}'")

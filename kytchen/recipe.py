@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Optional, Union, cast
 
 if TYPE_CHECKING:
@@ -15,7 +16,8 @@ from decimal import Decimal
 
 from .views import (
     DashboardTable, DashboardTableModel, CoreTableModel, FixTable,
-    create_new, num, Numeric, Title, Subtitle, general_margin, no_margin
+    create_new, num, num_string, metric_strings, set_metric_labels, Numeric,
+    Title, Subtitle, general_margin, no_margin
 )
 
 
@@ -143,12 +145,15 @@ class Recipe:
             amounts.append((component, amount * servings))
         return amounts
 
-    def get_calories(self, servings: Union[Decimal, int] = 1) -> Union[Decimal, int]:
-        calories: Union[Decimal, int] = 0
+    def get_metric(self, metric: str, servings: Union[Decimal, int] = 1) -> Decimal:
+        total = Decimal(0)
         amounts = self.get_amounts(servings)
         for (component, amount) in amounts:
-            calories += amount * component.get_calories()
-        return calories
+            total += amount * component.get_metric(metric)
+        return total
+
+    def get_metrics(self, servings: Union[Decimal, int] = 1) -> dict[str, Decimal]:
+        return {metric: self.get_metric(metric, servings) for metric in self.cookbook.metrics}
 
     def get_seconds(self) -> float:
         total_seconds: float = 0
@@ -163,8 +168,9 @@ class Recipe:
         string = self.name
         string += f"""
 Servings: {servings}
-Calories: {math.ceil(self.get_calories(servings))} kcal
 """
+        for metric in metric_strings(self.get_metrics(servings)):
+            string += f"{metric}\n"
         time = time_string(self.get_seconds())
         string += f"Preparation time: {time}\n"
 
@@ -178,25 +184,28 @@ Calories: {math.ceil(self.get_calories(servings))} kcal
         for step in self.steps:
             string += f"\n- {step.description} ({time_string(step.seconds)})"
             tot_seconds += step.seconds
-            string += " >{time_string(tot_seconds)}"
+            string += f" >{time_string(tot_seconds)}"
         return string
 
     def __str__(self) -> str:
         return self.recipe_string(servings = 1)
     
     def __repr__(self) -> str:
-        return f"{self.name} ({math.ceil(self.get_calories(1))} kcal/serv)"
+        metrics = metric_strings(self.get_metrics(), "/serv")
+        if not metrics:
+            return self.name
+        return f"{self.name} ({', '.join(metrics)})"
 
-    def _col(self, col: int) -> Optional[str]:
+    def _col(self, col: int, metrics: list[str]) -> Optional[str]:
         if col == 0:
             return self._id
         elif col == 1:
             return self.name
         elif col == 2:
             return self.category
-        elif col == 3:
-            return str(self.get_calories())
-        elif col == 4:
+        elif col < 3 + len(metrics):
+            return num_string(self.get_metric(metrics[col - 3]))
+        elif col == 3 + len(metrics):
             return self.get_time()
         else:
             return None
@@ -223,17 +232,18 @@ Calories: {math.ceil(self.get_calories(servings))} kcal
 
 class RecipeDashModel(DashboardTableModel):
     content: list[Recipe]
-    header_names = ["ID", "Recipe name", "Category", "kcal", "Prep. time", ""]
-    align = ["", "left", "", "", "", "", ""]
-    not_editable = [3, 4, 5]
+    align = ["", "left"]
 
     def __init__(self, parent: Optional[QWidget], cookbook: Cookbook) -> None:
         self.cookbook = cookbook
+        self.header_names = (["ID", "Recipe name", "Category"]
+            + cookbook.metrics + ["Prep. time", ""])
+        self.not_editable = list(range(3, len(self.header_names)))
         super().__init__(parent, cookbook.recipes)
 
     def get_data(self, row: int, col: int) -> Optional[str]:
         recipe = self.content[row]
-        return recipe._col(col)
+        return recipe._col(col, self.cookbook.metrics)
 
 
     def set_data(self, row: int, col: int, value: Any) -> bool:
@@ -262,9 +272,14 @@ class RecipeDashModel(DashboardTableModel):
 class RecipeDashTable(DashboardTable):
     ModelClass = RecipeDashModel 
     item_name = "recipe"
-    default_widths = [(0, 150), (2, 150), (3, 100), (4, 100)]
-    fixed_widths = [3, 4]
+    default_widths = [(0, 150), (2, 150)]
     stretch_widths = [1]
+
+    def __init__(self, cookbook: Cookbook) -> None:
+        super().__init__(cookbook)
+        # One column per metric, followed by the preparation time
+        columns = list(range(3, self.model.ncols - 1))
+        self.resize_columns([(col, 100) for col in columns], columns, [])
 
 
 
@@ -284,13 +299,15 @@ class RecipeView(QWidget):
 
         hbox = QHBoxLayout()
         self.name_label = Title("")
-        self.kcal_label = Title("")
+        self.main_metric_label = Title("")
         self.time_label = Subtitle("")
+        self.other_metrics_label = Subtitle("")
         hbox.addWidget(self.name_label)
         hbox.addStretch(1)
-        hbox.addWidget(self.kcal_label)
+        hbox.addWidget(self.main_metric_label)
         self.heading.addLayout(hbox)
         self.heading.addWidget(self.time_label)
+        self.heading.addWidget(self.other_metrics_label)
         self.layout.addLayout(self.heading)
 
         self.refresh_name()
@@ -328,7 +345,8 @@ class RecipeView(QWidget):
         self.set_editing(not self.editing)
 
     def refresh(self) -> None:
-        self.kcal_label.setText(f"{self.recipe.get_calories()} kcal")
+        set_metric_labels(self.main_metric_label, self.other_metrics_label,
+                          metric_strings(self.recipe.get_metrics()))
         self.time_label.setText(f"Preparation time {self.recipe.get_time()}")
 
     def refresh_name(self) -> None:

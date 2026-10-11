@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Any, Callable, Optional, Union, cast
 
 from PyQt6.QtCore import (
@@ -23,6 +24,17 @@ def num(value: Numeric) -> Decimal:
         raise ValueError("expected non-negative amount")
     return value
 
+def num_string(value: Decimal) -> str:
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+def metric_strings(values: dict[str, Decimal], per: str = "") -> list[str]:
+    return [f"{num_string(value)} {metric}{per}" for metric, value in values.items()]
+
+def set_metric_labels(main_label: QLabel, other_label: QLabel, metrics: list[str]) -> None:
+    main_label.setText(metrics[0] if metrics else "")
+    other_label.setText(" · ".join(metrics[1:]))
+    other_label.setVisible(len(metrics) > 1)
+
 def show_error(view: Optional[QWidget], msg: str) -> None:
     msg_box = QMessageBox(view)
     msg_box.setIcon(QMessageBox.Icon.Critical)
@@ -30,6 +42,10 @@ def show_error(view: Optional[QWidget], msg: str) -> None:
     msg_box.setText(msg)
     msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
     msg_box.exec()
+
+def ask_confirmation(view: Optional[QWidget], msg: str) -> bool:
+    answer = QMessageBox.question(view, "Confirm", msg)
+    return answer == QMessageBox.StandardButton.Yes
 
 def create_new(parent: Optional[QWidget], object_id: str, create_function: Callable[[str], bool]) -> None:
     ok = True
@@ -213,12 +229,7 @@ class CoreTable(QWidget):
         self.table.setModel(self.model)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        for row, width in self.default_widths:
-            self.table.setColumnWidth(row, width)
-        for row in self.fixed_widths:
-            cast(QHeaderView, self.table.horizontalHeader()).setSectionResizeMode(row, QHeaderView.ResizeMode.Fixed)
-        for row in self.stretch_widths:
-            cast(QHeaderView, self.table.horizontalHeader()).setSectionResizeMode(row, QHeaderView.ResizeMode.Stretch)
+        self.resize_columns(self.default_widths, self.fixed_widths, self.stretch_widths)
 
         self.layout: QVBoxLayout = QVBoxLayout()  # type: ignore[assignment]
         no_margin(self.layout)
@@ -242,6 +253,15 @@ class CoreTable(QWidget):
             self.is_editable = False
 
         self.setLayout(self.layout)
+
+    def resize_columns(self, default_widths: list[tuple[int, int]], fixed_widths: list[int], stretch_widths: list[int]) -> None:
+        header = cast(QHeaderView, self.table.horizontalHeader())
+        for row, width in default_widths:
+            self.table.setColumnWidth(row, width)
+        for row in fixed_widths:
+            header.setSectionResizeMode(row, QHeaderView.ResizeMode.Fixed)
+        for row in stretch_widths:
+            header.setSectionResizeMode(row, QHeaderView.ResizeMode.Stretch)
 
     def open_menu(self, position: QPoint) -> None:
         if not self.is_editable:
