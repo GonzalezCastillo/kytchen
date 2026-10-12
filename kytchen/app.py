@@ -22,15 +22,15 @@ from .ingredient import IngredientTable
 from .recipe import RecipeDashTable
 from .mealplan import MealplanDashTable
 from .metric import MetricTable
-from .views import (
+from .widgets import (
     Title,
     Subtitle,
     show_error,
     ask_confirmation,
     general_margin,
     ClickLabel,
-    SelectionClearer,
 )
+from .tables import SelectionClearer
 from . import __version__
 
 os.environ["QT_LOGGING_RULES"] = "*.warning=false"

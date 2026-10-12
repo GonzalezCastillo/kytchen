@@ -7,7 +7,7 @@ if TYPE_CHECKING:
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QInputDialog, QLabel, QWidget
 
-from .views import CoreTableModel, FixTable
+from .tables import CoreTableModel, FixTable
 
 
 class MetricModel(CoreTableModel):

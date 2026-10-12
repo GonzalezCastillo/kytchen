@@ -12,7 +12,8 @@ from pathlib import Path
 from .ingredient import Ingredient
 from .recipe import Recipe
 from .mealplan import Mealplan
-from .views import show_error, ask_confirmation, num, Numeric
+from .numeric import num, Numeric
+from .widgets import show_error, ask_confirmation
 
 DEFAULT_METRICS = ["kcal"]
 

@@ -9,7 +9,9 @@ if TYPE_CHECKING:
 
 import uuid
 from decimal import Decimal
-from .views import SortTableModel, SortTable, ask_name, num, Numeric
+from .numeric import num, Numeric
+from .widgets import ask_name
+from .tables import SortTableModel, SortTable
 
 
 class Ingredient:

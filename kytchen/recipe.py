@@ -20,23 +20,15 @@ from PyQt6.QtWidgets import (
 import uuid
 from decimal import Decimal
 
-from .views import (
+from .numeric import num_string, exact_string, json_number, metric_strings, Numeric
+from .widgets import DetailView, ServingsBox, ask_name, show_error, no_margin
+from .delegates import TextDelegate
+from .tables import (
     DashboardTable,
     DashboardTableModel,
     CoreTableModel,
     FixTable,
     EntriesTable,
-    DetailView,
-    TextDelegate,
-    ServingsBox,
-    ask_name,
-    num_string,
-    exact_string,
-    json_number,
-    metric_strings,
-    show_error,
-    Numeric,
-    no_margin,
 )
 
 

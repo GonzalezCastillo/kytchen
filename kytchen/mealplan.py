@@ -15,20 +15,14 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QStackedWidget,
 )
-from .views import (
+from .numeric import num_string, amount_string, metric_strings
+from .widgets import DetailView, symbol_button, Subtitle, Heading, no_margin
+from .tables import (
     DashboardTable,
     DashboardTableModel,
     CoreTableModel,
     EntriesTable,
-    DetailView,
     CoreTable,
-    num_string,
-    amount_string,
-    metric_strings,
-    symbol_button,
-    Subtitle,
-    Heading,
-    no_margin,
 )
 
 
